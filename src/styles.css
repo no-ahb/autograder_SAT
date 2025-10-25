@@ -4,14 +4,14 @@
 
 @layer base {
   :root {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   body {
-    @apply bg-slate-950 text-slate-100;
+    @apply bg-slate-50 text-slate-900;
   }
 
   ::selection {
-    @apply bg-primary text-primary-foreground;
+    @apply bg-blue-500 text-white;
   }
 }
