@@ -1,8 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, CheckCircle2, ClipboardCopy, FileText, Upload } from 'lucide-react';
+import {
+  AlertCircle,
+  BarChart3,
+  CheckCircle2,
+  ClipboardCopy,
+  FileText,
+  Upload,
+  Plus
+} from 'lucide-react';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf';
 import { grade, parseKeyText, parseStudentAnswers } from './grader.js';
+import { StudentAnalytics } from './StudentAnalytics.jsx';
+import {
+  loadStudents,
+  saveStudents,
+  createStudent,
+  ensureStudentShape
+} from './studentStore.js';
 
 const keyFiles = import.meta.glob('./keys/*.txt', {
   query: '?raw',
@@ -54,9 +69,7 @@ function createKeyEntry(path, raw) {
     total: key.size,
     subjectToken,
     number,
-    label: descriptorLabel
-      ? `${subjectLabel} ${numberToken}: ${descriptorLabel}`
-      : `${subjectLabel} ${numberToken}`,
+    label: descriptorLabel ? `${subjectLabel} ${numberToken}: ${descriptorLabel}` : `${subjectLabel} ${numberToken}`,
     descriptor: descriptorLabel,
     subjectLabel,
     raw
@@ -66,16 +79,13 @@ function createKeyEntry(path, raw) {
 const KEY_BANK = Object.entries(keyFiles)
   .map(([path, raw]) => createKeyEntry(path, raw))
   .sort((a, b) => {
-    const subjectOrder =
-      a.subjectToken === b.subjectToken ? 0 : a.subjectToken === 'english' ? -1 : 1;
+    const subjectOrder = a.subjectToken === b.subjectToken ? 0 : a.subjectToken === 'english' ? -1 : 1;
     if (subjectOrder !== 0) {
       return subjectOrder;
     }
-
     if (!Number.isNaN(a.number) && !Number.isNaN(b.number) && a.number !== b.number) {
       return a.number - b.number;
     }
-
     return a.label.localeCompare(b.label);
   });
 
@@ -99,6 +109,23 @@ const FRACTION_FORMATTER = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1
 });
 
+const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric'
+});
+
+function formatDateValue(value) {
+  if (!value) {
+    return '--';
+  }
+  try {
+    return DATE_FORMATTER.format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
 function formatReport(result) {
   if (!result) {
     return '';
@@ -108,17 +135,13 @@ function formatReport(result) {
     keyName,
     correct,
     incorrect,
-    missing,
     manualReview,
     denominator,
     total,
-    percent,
-    skipMissing
+    percent
   } = result;
 
-  const summaryLine = `${correct} / ${
-    skipMissing ? denominator : total
-  } correct (${FRACTION_FORMATTER.format(percent)}%)`;
+  const summaryLine = `${correct} / ${denominator || total} correct (${FRACTION_FORMATTER.format(percent)}%)`;
 
   const lines = [`Worksheet: ${keyName}`, summaryLine, ''];
 
@@ -148,12 +171,8 @@ function formatReport(result) {
     lines.push('Manual review: none', '');
   }
 
-  // Omit missing section from copyable report
-
   return lines.join('\n').trim();
 }
-
-// Self-tests removed from UI
 
 function Confetti({ show }) {
   const pieces = useMemo(
@@ -223,7 +242,6 @@ function ResultCard({ result }) {
             {result.correct} / {result.skipMissing ? result.denominator : result.total} correct{' '}
             <span className="text-slate-500">({percentDisplay}%)</span>
           </p>
-          {/* Skip-missing tag removed from UI */}
         </div>
       </div>
 
@@ -255,9 +273,7 @@ function ResultCard({ result }) {
               {result.manualReview.map((item) => (
                 <li key={item.question}>
                   {item.question}: {item.answers.join(', ')}
-                  <span className="block text-xs text-slate-500">
-                    {item.reasons.join('; ')}
-                  </span>
+                  <span className="block text-xs text-slate-500">{item.reasons.join('; ')}</span>
                 </li>
               ))}
             </ul>
@@ -290,8 +306,10 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [copyStatus, setCopyStatus] = useState('');
-  // self-tests removed
   const [showConfetti, setShowConfetti] = useState(false);
+  const [students, setStudents] = useState([]);
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [showStudentAnalytics, setShowStudentAnalytics] = useState(false);
   const confettiTimerRef = useRef(null);
 
   useEffect(
@@ -303,7 +321,161 @@ export default function App() {
     []
   );
 
+  useEffect(() => {
+    const stored = loadStudents();
+    if (stored.length > 0) {
+      setStudents(stored);
+      setSelectedStudentId(stored[0].id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (students.length === 0) {
+      setSelectedStudentId('');
+      return;
+    }
+    if (!students.some((student) => student.id === selectedStudentId)) {
+      setSelectedStudentId(students[0].id);
+    }
+  }, [students, selectedStudentId]);
+
+  useEffect(() => {
+    saveStudents(students);
+  }, [students]);
+
   const selectedKey = useMemo(() => KEY_LOOKUP.get(selectedKeyId), [selectedKeyId]);
+
+  const selectedStudent = useMemo(
+    () => students.find((student) => student.id === selectedStudentId) ?? null,
+    [students, selectedStudentId]
+  );
+
+  const updateCurrentStudent = (mutator) => {
+    if (!selectedStudentId) {
+      return;
+    }
+    setStudents((prev) =>
+      prev.map((student) => {
+        if (student.id !== selectedStudentId) {
+          return student;
+        }
+        const changes = mutator(student) ?? {};
+        const merged = ensureStudentShape({
+          ...student,
+          ...changes
+        });
+        merged.updatedAt = new Date().toISOString();
+        return merged;
+      })
+    );
+  };
+
+  const handleAddStudent = () => {
+    const name = window.prompt('Student name');
+    if (!name || !name.trim()) {
+      return;
+    }
+    const newStudent = createStudent(name.trim());
+    setStudents((prev) => [...prev, newStudent]);
+    setSelectedStudentId(newStudent.id);
+    setShowStudentAnalytics(false);
+  };
+
+  const handleAddCustomPractice = () => {
+    updateCurrentStudent((student) => ({
+      customPracticeTests: [
+        ...(student.customPracticeTests ?? []),
+        {
+          id: `custom-${Date.now()}`,
+          label: `Practice ${((student.customPracticeTests ?? []).length || 0) + 1}`,
+          date: '',
+          composite: '',
+          math: '',
+          readingWriting: ''
+        }
+      ]
+    }));
+  };
+
+  const handleUpdatePractice = (id, key, value) => {
+    updateCurrentStudent((student) => ({
+      practiceTests: (student.practiceTests ?? []).map((test) =>
+        test.id === id ? { ...test, [key]: value } : test
+      )
+    }));
+  };
+
+  const handleUpdateCustomPractice = (id, key, value) => {
+    updateCurrentStudent((student) => ({
+      customPracticeTests: (student.customPracticeTests ?? []).map((test) =>
+        test.id === id ? { ...test, [key]: value } : test
+      )
+    }));
+  };
+
+  const handleAddRealTest = () => {
+    updateCurrentStudent((student) => ({
+      realTests: [
+        ...(student.realTests ?? []),
+        {
+          id: `official-${Date.now()}`,
+          date: '',
+          status: 'upcoming',
+          composite: '',
+          math: '',
+          readingWriting: '',
+          notes: ''
+        }
+      ]
+    }));
+  };
+
+  const handleUpdateRealTest = (id, key, value) => {
+    updateCurrentStudent((student) => ({
+      realTests: (student.realTests ?? []).map((test) =>
+        test.id === id ? { ...test, [key]: value } : test
+      )
+    }));
+  };
+
+  const persistWorksheetResult = (gradeResult) => {
+    if (!selectedKey || !selectedStudent) {
+      return;
+    }
+    const entry = {
+      id: `worksheet-${Date.now()}`,
+      worksheetId: selectedKey.id,
+      worksheetLabel: selectedKey.label,
+      date: new Date().toISOString(),
+      correct: gradeResult.correct,
+      denominator: gradeResult.denominator,
+      total: gradeResult.total,
+      skipMissing,
+      percent: gradeResult.percent,
+      incorrect: gradeResult.incorrect,
+      manualReview: gradeResult.manualReview,
+      missingQuestions: gradeResult.missing
+    };
+
+    updateCurrentStudent((student) => {
+      const worksheets = Array.isArray(student.worksheets) ? [...student.worksheets] : [];
+      const existingIndex = worksheets.findIndex(
+        (item) => item.worksheetId === selectedKey.id
+      );
+      if (existingIndex >= 0) {
+        worksheets[existingIndex] = entry;
+      } else {
+        worksheets.unshift(entry);
+      }
+      return {
+        worksheets,
+        topicChecklist: {
+          ...(student.topicChecklist ?? {}),
+          [selectedKey.id]: true
+        }
+      };
+    });
+  };
 
   const handleFile = async (file) => {
     if (!file) {
@@ -344,7 +516,10 @@ export default function App() {
       setError('Pick a worksheet key to grade.');
       return;
     }
-
+    if (!selectedStudent) {
+      setError('Add or select a student to log results.');
+      return;
+    }
     if (selectedKey.total === 0) {
       setError('Selected key has no questions.');
       return;
@@ -361,6 +536,8 @@ export default function App() {
         studentAnswers: parsedAnswers,
         skipMissing
       });
+
+      persistWorksheetResult(gradeResult);
 
       const report = formatReport({
         ...gradeResult,
@@ -424,6 +601,22 @@ export default function App() {
     event.preventDefault();
   };
 
+  if (showStudentAnalytics && selectedStudent) {
+    return (
+      <StudentAnalytics
+        student={selectedStudent}
+        worksheetsMeta={KEY_BANK}
+        onClose={() => setShowStudentAnalytics(false)}
+        onUpdate={updateCurrentStudent}
+        onAddCustomPractice={handleAddCustomPractice}
+        onUpdatePractice={handleUpdatePractice}
+        onUpdateCustomPractice={handleUpdateCustomPractice}
+        onAddRealTest={handleAddRealTest}
+        onUpdateRealTest={handleUpdateRealTest}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-rose-50 pb-10 text-slate-900">
       <Confetti show={showConfetti} />
@@ -441,6 +634,58 @@ export default function App() {
             transition={{ type: 'spring', stiffness: 220, damping: 20 }}
           >
             <div className="grid gap-4">
+              <div className="space-y-2">
+                <span className="text-sm font-medium text-slate-600">Student</span>
+                {students.length > 0 ? (
+                  <motion.select
+                    value={selectedStudentId}
+                    onChange={(event) => setSelectedStudentId(event.target.value)}
+                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    whileHover={{ scale: 1.01 }}
+                    whileFocus={{ scale: 1.01 }}
+                    aria-label="Select student"
+                  >
+                    {students.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name}
+                      </option>
+                    ))}
+                  </motion.select>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Add a student to start tracking worksheets and tests.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <motion.button
+                    type="button"
+                    onClick={handleAddStudent}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+                    whileHover={{ scale: 1.04, translateY: -2 }}
+                    whileTap={{ scale: 0.96 }}
+                  >
+                    <Plus className="size-4" aria-hidden />
+                    Add student
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    onClick={() => selectedStudent && setShowStudentAnalytics(true)}
+                    disabled={!selectedStudent}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition enabled:hover:border-blue-300 enabled:hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    whileHover={!selectedStudent ? undefined : { scale: 1.04, translateY: -2 }}
+                    whileTap={!selectedStudent ? undefined : { scale: 0.96 }}
+                  >
+                    <BarChart3 className="size-4" aria-hidden />
+                    Student analytics
+                  </motion.button>
+                </div>
+                {selectedStudent && selectedStudent.upcomingSatDate ? (
+                  <p className="text-xs text-slate-500">
+                    Next SAT: {formatDateValue(selectedStudent.upcomingSatDate)}
+                  </p>
+                ) : null}
+              </div>
+
               <label className="flex flex-col gap-2">
                 <span className="text-sm font-medium text-slate-600">Worksheet key</span>
                 <div className="relative">
@@ -469,145 +714,144 @@ export default function App() {
                 </div>
               </label>
 
-            <div className="flex items-end">
-              <motion.label
-                whileHover={{ scale: 1.02, translateY: -3 }}
-                whileTap={{ scale: 0.97 }}
-                className="group flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 transition hover:border-blue-300 hover:bg-blue-50 focus-within:border-blue-300"
-              >
-                <input
-                  type="file"
-                  accept=".pdf,.txt"
-                  className="sr-only"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      void handleFile(file);
-                      event.target.value = '';
-                    }
-                  }}
-                />
-                <Upload className="size-6 text-blue-500" aria-hidden />
-                <span className="font-medium text-slate-900">Upload PDF or TXT</span>
-                <span className="text-xs text-slate-500">Drag & drop, or click to browse.</span>
-                {fileName ? (
-                  <p className="mt-2 text-xs text-slate-600" aria-live="polite">
-                    Loaded: {fileName}
-                  </p>
-                ) : null}
-              </motion.label>
-            </div>
-          </div>
-
-          <div
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            className="group rounded-2xl border border-slate-200 bg-slate-50 transition focus-within:border-blue-300"
-          >
-            <label className="flex w-full flex-col gap-2 p-4">
-              <span className="flex items-center justify-between text-sm font-medium text-slate-600">
-                Student answers
-                <span className="text-xs text-slate-500">Supports patterns like 1) A | 27.)C | 32.c</span>
-              </span>
-              <textarea
-                value={studentInput}
-                onChange={(event) => setStudentInput(event.target.value)}
-                rows={10}
-                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                placeholder="Paste answers here"
-                aria-label="Student answer text"
-              />
-            </label>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <label className="inline-flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={skipMissing}
-                onChange={(event) => setSkipMissing(event.target.checked)}
-                className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200"
-              />
-              Skip missing/illegible from denominator
-            </label>
-            <div className="flex flex-wrap gap-3">
-              <motion.button
-                type="button"
-                onClick={handleClear}
-                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
-                whileHover={{ scale: 1.04, translateY: -2 }}
-                whileTap={{ scale: 0.96 }}
-              >
-                Clear
-              </motion.button>
-              <motion.button
-                type="button"
-                onClick={handleGrade}
-                className="inline-flex items-center gap-2 rounded-full bg-blue-500 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-200/60 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 active:scale-95 disabled:opacity-50"
-                whileHover={
-                  isGrading || isLoadingFile ? undefined : { scale: 1.05, translateY: -3 }
-                }
-                whileTap={isGrading || isLoadingFile ? undefined : { scale: 0.95 }}
-                disabled={isGrading || isLoadingFile}
-              >
-                <CheckCircle2 className="size-4" aria-hidden />
-                {isGrading ? 'Grading...' : 'Grade worksheet'}
-              </motion.button>
-              <motion.button
-                type="button"
-                onClick={handleCopyReport}
-                disabled={!result}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition enabled:hover:border-blue-300 enabled:hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
-                whileHover={!result ? undefined : { scale: 1.04, translateY: -2 }}
-                whileTap={!result ? undefined : { scale: 0.96 }}
-              >
-                <ClipboardCopy className="size-4" aria-hidden />
-                Copy summary
-              </motion.button>
-            </div>
-          </div>
-
-          <div className="space-y-2 text-sm">
-            <AnimatePresence>
-              {isLoadingFile ? (
-                <motion.p
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1 text-sky-700 shadow-sm"
+              <div className="flex items-end">
+                <motion.label
+                  whileHover={{ scale: 1.02, translateY: -3 }}
+                  whileTap={{ scale: 0.97 }}
+                  className="group flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 transition hover:border-blue-300 hover:bg-blue-50 focus-within:border-blue-300"
                 >
-                  <motion.span
-                    className="flex size-4 items-center justify-center"
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}
-                  >
-                    <Upload className="size-4" aria-hidden />
-                  </motion.span>
-                  Loading file...
-                </motion.p>
-              ) : null}
-            </AnimatePresence>
-            <AnimatePresence>
-              {copyStatus ? (
-                <motion.p
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-blue-700 shadow-sm"
+                  <input
+                    type="file"
+                    accept=".pdf,.txt"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        void handleFile(file);
+                        event.target.value = '';
+                      }
+                    }}
+                  />
+                  <Upload className="size-6 text-blue-500" aria-hidden />
+                  <span className="font-medium text-slate-900">Upload PDF or TXT</span>
+                  <span className="text-xs text-slate-500">Drag and drop, or click to browse.</span>
+                  {fileName ? (
+                    <p className="mt-2 text-xs text-slate-600" aria-live="polite">
+                      Loaded: {fileName}
+                    </p>
+                  ) : null}
+                </motion.label>
+              </div>
+            </div>
+
+            <div
+              onDrop={onDrop}
+              onDragOver={onDragOver}
+              className="group rounded-2xl border border-slate-200 bg-slate-50 transition focus-within:border-blue-300"
+            >
+              <label className="flex w-full flex-col gap-2 p-4">
+                <span className="flex items-center justify-between text-sm font-medium text-slate-600">
+                  Student answers
+                  <span className="text-xs text-slate-500">Supports patterns like 1) A | 27.)C | 32.c</span>
+                </span>
+                <textarea
+                  value={studentInput}
+                  onChange={(event) => setStudentInput(event.target.value)}
+                  rows={10}
+                  className="w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  placeholder="Paste answers here"
+                  aria-label="Student answer text"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={skipMissing}
+                  onChange={(event) => setSkipMissing(event.target.checked)}
+                  className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200"
+                />
+                Skip missing or illegible from denominator
+              </label>
+              <div className="flex flex-wrap gap-3">
+                <motion.button
+                  type="button"
+                  onClick={handleClear}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+                  whileHover={{ scale: 1.04, translateY: -2 }}
+                  whileTap={{ scale: 0.96 }}
+                >
+                  Clear
+                </motion.button>
+                <motion.button
+                  type="button"
+                  onClick={handleGrade}
+                  className="inline-flex items-center gap-2 rounded-full bg-blue-500 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-200/60 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 disabled:opacity-50"
+                  whileHover={
+                    isGrading || isLoadingFile ? undefined : { scale: 1.05, translateY: -3 }
+                  }
+                  whileTap={isGrading || isLoadingFile ? undefined : { scale: 0.95 }}
+                  disabled={isGrading || isLoadingFile}
+                >
+                  <CheckCircle2 className="size-4" aria-hidden />
+                  {isGrading ? 'Grading...' : 'Grade worksheet'}
+                </motion.button>
+                <motion.button
+                  type="button"
+                  onClick={handleCopyReport}
+                  disabled={!result}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition enabled:hover:border-blue-300 enabled:hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  whileHover={!result ? undefined : { scale: 1.04, translateY: -2 }}
+                  whileTap={!result ? undefined : { scale: 0.96 }}
                 >
                   <ClipboardCopy className="size-4" aria-hidden />
-                  {copyStatus}
-                </motion.p>
+                  Copy summary
+                </motion.button>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-sm">
+              <AnimatePresence>
+                {isLoadingFile ? (
+                  <motion.p
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1 text-sky-700 shadow-sm"
+                  >
+                    <motion.span
+                      className="flex size-4 items-center justify-center"
+                      animate={{ rotate: 360 }}
+                      transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}
+                    >
+                      <Upload className="size-4" aria-hidden />
+                    </motion.span>
+                    Loading file...
+                  </motion.p>
+                ) : null}
+              </AnimatePresence>
+              <AnimatePresence>
+                {copyStatus ? (
+                  <motion.p
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-blue-700 shadow-sm"
+                  >
+                    <ClipboardCopy className="size-4" aria-hidden />
+                    {copyStatus}
+                  </motion.p>
+                ) : null}
+              </AnimatePresence>
+              {error ? (
+                <p className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-600">
+                  <AlertCircle className="size-4" aria-hidden />
+                  <span>{error}</span>
+                </p>
               ) : null}
-            </AnimatePresence>
-            {/* self-tests UI removed */}
-            {error ? (
-              <p className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-600">
-                <AlertCircle className="size-4" aria-hidden />
-                <span>{error}</span>
-              </p>
-            ) : null}
-          </div>
+            </div>
           </motion.section>
 
           <div className="md:sticky md:top-4">
