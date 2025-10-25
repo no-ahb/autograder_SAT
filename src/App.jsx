@@ -1,18 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  AlertCircle,
-  CheckCircle2,
-  ClipboardCopy,
-  FileText,
-  Sparkles,
-  Star,
-  Upload
-} from 'lucide-react';
+import { AlertCircle, CheckCircle2, ClipboardCopy, FileText, Upload } from 'lucide-react';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf';
 import { grade, parseKeyText, parseStudentAnswers } from './grader.js';
 
-const keyFiles = import.meta.glob('./keys/*.txt', { query: '?raw', import: 'default', eager: true })
+const keyFiles = import.meta.glob('./keys/*.txt', {
+  query: '?raw',
+  import: 'default',
+  eager: true
+});
 
 const LOWER_CASE_WORDS = new Set(['and', 'of', 'the', 'for', 'to', 'a', 'in', 'with', 'on']);
 const ALWAYS_UPPER = new Set(['sat']);
@@ -122,9 +118,7 @@ function formatReport(result) {
 
   const summaryLine = `${correct} / ${
     skipMissing ? denominator : total
-  } correct (${FRACTION_FORMATTER.format(percent)}%)${
-    skipMissing ? ' - missing responses excluded' : ''
-  }`;
+  } correct (${FRACTION_FORMATTER.format(percent)}%)`;
 
   const lines = [`Worksheet: ${keyName}`, summaryLine, ''];
 
@@ -154,64 +148,12 @@ function formatReport(result) {
     lines.push('Manual review: none', '');
   }
 
-  if (missing.length > 0) {
-    lines.push(`Missing: ${missing.join(', ')}`);
-  } else {
-    lines.push('Missing: none');
-  }
+  // Omit missing section from copyable report
 
   return lines.join('\n').trim();
 }
 
-function runSelfTests() {
-  const cases = [
-    { text: '1) b', expected: { 1: 'B' } },
-    { text: '2.D', expected: { 2: 'D' } },
-    { text: '(3) c', expected: { 3: 'C' } },
-    { text: '5- a', expected: { 5: 'A' } },
-    { text: '27.)C', expected: { 27: 'C' } },
-    { text: '32.c', expected: { 32: 'C' } }
-  ];
-
-  for (const test of cases) {
-    const parsed = parseStudentAnswers(test.text);
-    const entry = parsed.answers.entries().next().value;
-    const [expectedQuestion, expectedAnswer] = Object.entries(test.expected)[0];
-
-    if (!entry || entry[0] !== Number(expectedQuestion)) {
-      throw new Error(`Parser failed to locate question in "${test.text}"`);
-    }
-
-    const [question, answer] = entry;
-    if (answer !== expectedAnswer) {
-      throw new Error(`Parser mismatch for question ${question}`);
-    }
-  }
-
-  const key = new Map([
-    [1, 'A'],
-    [2, 'B'],
-    [3, 'C'],
-    [4, 'D']
-  ]);
-
-  const student = parseStudentAnswers('1) a\n2) c\n2) b\n4) g');
-  const graded = grade({ key, studentAnswers: student, skipMissing: false });
-
-  if (graded.correct !== 1) {
-    throw new Error('Grader failed to count correct answers');
-  }
-
-  if (graded.manualReviewCount !== 1 || graded.manualReview[0].question !== 2) {
-    throw new Error('Duplicate detection failed');
-  }
-
-  if (graded.manualReview.some((item) => item.question === 4) === false) {
-    throw new Error('Invalid answer value should flag manual review');
-  }
-
-  return 'All self-tests passed';
-}
+// Self-tests removed from UI
 
 function Confetti({ show }) {
   const pieces = useMemo(
@@ -281,11 +223,7 @@ function ResultCard({ result }) {
             {result.correct} / {result.skipMissing ? result.denominator : result.total} correct{' '}
             <span className="text-slate-500">({percentDisplay}%)</span>
           </p>
-          {result.skipMissing ? (
-            <p className="text-xs font-medium uppercase tracking-wide text-amber-600">
-              Missing responses excluded
-            </p>
-          ) : null}
+          {/* Skip-missing tag removed from UI */}
         </div>
       </div>
 
@@ -352,7 +290,7 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [copyStatus, setCopyStatus] = useState('');
-  const [selfTestStatus, setSelfTestStatus] = useState(null);
+  // self-tests removed
   const [showConfetti, setShowConfetti] = useState(false);
   const confettiTimerRef = useRef(null);
 
@@ -474,15 +412,6 @@ export default function App() {
     setError(null);
   };
 
-  const handleSelfTests = () => {
-    try {
-      const message = runSelfTests();
-      setSelfTestStatus({ status: 'success', message });
-    } catch (err) {
-      setSelfTestStatus({ status: 'error', message: err.message });
-    }
-  };
-
   const onDrop = (event) => {
     event.preventDefault();
     const file = event.dataTransfer.files?.[0];
@@ -496,62 +425,56 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-rose-50 pb-20 text-slate-900">
+    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-rose-50 pb-10 text-slate-900">
       <Confetti show={showConfetti} />
       <header className="border-b border-white/70 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold text-slate-900 sm:text-4xl">
-              SAT Worksheet Autograder
-            </h1>
-          </div>
-          <div className="flex flex-col items-end gap-2 text-right">
-            <button
-              type="button"
-              onClick={handleSelfTests}
-              className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm shadow-amber-200 transition hover:-translate-y-0.5 hover:bg-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 active:translate-y-0"
-            >
-              <Sparkles className="size-4" aria-hidden />
-              Self-tests
-            </button>
-            <p className="text-xs text-slate-500">
-              Runs a quick parser + grader check with sample answers.
-            </p>
-          </div>
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+          <h1 className="text-2xl font-semibold text-slate-900">SAT Worksheet Autograder</h1>
         </div>
       </header>
 
-      <main className="mx-auto mt-10 max-w-6xl px-4">
-        <section className="space-y-8 rounded-3xl border border-white/80 bg-white/90 p-6 shadow-xl shadow-sky-100">
-          <div className="grid gap-6 md:grid-cols-[1.5fr,1fr]">
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-slate-600">Worksheet key</span>
-              <div className="relative">
-                <select
-                  value={selectedKeyId}
-                  onChange={(event) => setSelectedKeyId(event.target.value)}
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  aria-label="Select worksheet answer key"
-                >
-                  {Array.from(KEY_GROUPS.entries()).map(([groupLabel, items]) => (
-                    <optgroup key={groupLabel} label={groupLabel}>
-                      {items.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.label} ({item.total} questions)
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <FileText
-                  className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
-                  aria-hidden
-                />
-              </div>
-            </label>
+      <main className="mx-auto mt-6 max-w-6xl px-4">
+        <div className="grid gap-6 md:grid-cols-2">
+          <motion.section
+            className="space-y-4 rounded-3xl border border-white/80 bg-white/90 p-4 shadow-xl shadow-sky-100"
+            whileHover={{ translateY: -4 }}
+            transition={{ type: 'spring', stiffness: 220, damping: 20 }}
+          >
+            <div className="grid gap-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-medium text-slate-600">Worksheet key</span>
+                <div className="relative">
+                  <motion.select
+                    value={selectedKeyId}
+                    onChange={(event) => setSelectedKeyId(event.target.value)}
+                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    whileHover={{ scale: 1.01 }}
+                    whileFocus={{ scale: 1.01 }}
+                    aria-label="Select worksheet answer key"
+                  >
+                    {Array.from(KEY_GROUPS.entries()).map(([groupLabel, items]) => (
+                      <optgroup key={groupLabel} label={groupLabel}>
+                        {items.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.label} ({item.total} questions)
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </motion.select>
+                  <FileText
+                    className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
+                    aria-hidden
+                  />
+                </div>
+              </label>
 
             <div className="flex items-end">
-              <label className="group flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 transition hover:border-blue-300 hover:bg-blue-50 focus-within:border-blue-300">
+              <motion.label
+                whileHover={{ scale: 1.02, translateY: -3 }}
+                whileTap={{ scale: 0.97 }}
+                className="group flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 transition hover:border-blue-300 hover:bg-blue-50 focus-within:border-blue-300"
+              >
                 <input
                   type="file"
                   accept=".pdf,.txt"
@@ -572,7 +495,7 @@ export default function App() {
                     Loaded: {fileName}
                   </p>
                 ) : null}
-              </label>
+              </motion.label>
             </div>
           </div>
 
@@ -597,7 +520,7 @@ export default function App() {
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <label className="inline-flex items-center gap-2 text-sm text-slate-600">
               <input
                 type="checkbox"
@@ -608,35 +531,43 @@ export default function App() {
               Skip missing/illegible from denominator
             </label>
             <div className="flex flex-wrap gap-3">
-              <button
+              <motion.button
                 type="button"
                 onClick={handleClear}
                 className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+                whileHover={{ scale: 1.04, translateY: -2 }}
+                whileTap={{ scale: 0.96 }}
               >
                 Clear
-              </button>
-              <button
+              </motion.button>
+              <motion.button
                 type="button"
                 onClick={handleGrade}
                 className="inline-flex items-center gap-2 rounded-full bg-blue-500 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-200/60 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 active:scale-95 disabled:opacity-50"
+                whileHover={
+                  isGrading || isLoadingFile ? undefined : { scale: 1.05, translateY: -3 }
+                }
+                whileTap={isGrading || isLoadingFile ? undefined : { scale: 0.95 }}
                 disabled={isGrading || isLoadingFile}
               >
                 <CheckCircle2 className="size-4" aria-hidden />
                 {isGrading ? 'Grading...' : 'Grade worksheet'}
-              </button>
-              <button
+              </motion.button>
+              <motion.button
                 type="button"
                 onClick={handleCopyReport}
                 disabled={!result}
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition enabled:hover:border-blue-300 enabled:hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+                whileHover={!result ? undefined : { scale: 1.04, translateY: -2 }}
+                whileTap={!result ? undefined : { scale: 0.96 }}
               >
                 <ClipboardCopy className="size-4" aria-hidden />
                 Copy summary
-              </button>
+              </motion.button>
             </div>
           </div>
 
-          <div className="space-y-3 text-sm">
+          <div className="space-y-2 text-sm">
             <AnimatePresence>
               {isLoadingFile ? (
                 <motion.p
@@ -645,7 +576,13 @@ export default function App() {
                   exit={{ opacity: 0, y: -6 }}
                   className="inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1 text-sky-700 shadow-sm"
                 >
-                  <Upload className="size-4 animate-spin" aria-hidden />
+                  <motion.span
+                    className="flex size-4 items-center justify-center"
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}
+                  >
+                    <Upload className="size-4" aria-hidden />
+                  </motion.span>
                   Loading file...
                 </motion.p>
               ) : null}
@@ -663,18 +600,7 @@ export default function App() {
                 </motion.p>
               ) : null}
             </AnimatePresence>
-            {selfTestStatus ? (
-              <p
-                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${
-                  selfTestStatus.status === 'success'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-rose-100 text-rose-600'
-                }`}
-              >
-                <Star className="size-4" aria-hidden />
-                {selfTestStatus.message}
-              </p>
-            ) : null}
+            {/* self-tests UI removed */}
             {error ? (
               <p className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-600">
                 <AlertCircle className="size-4" aria-hidden />
@@ -682,12 +608,13 @@ export default function App() {
               </p>
             ) : null}
           </div>
-        </section>
+          </motion.section>
 
-        <div className="mt-10 space-y-6">
-          <AnimatePresence mode="wait">
-            {result ? <ResultCard key={result.keyId + skipMissing} result={result} /> : null}
-          </AnimatePresence>
+          <div className="md:sticky md:top-4">
+            <AnimatePresence mode="wait">
+              {result ? <ResultCard key={result.keyId + skipMissing} result={result} /> : null}
+            </AnimatePresence>
+          </div>
         </div>
       </main>
     </div>
