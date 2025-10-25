@@ -438,6 +438,33 @@ export default function App() {
     }));
   };
 
+  const handleDeleteCustomPractice = (id) => {
+    updateCurrentStudent((student) => ({
+      customPracticeTests: (student.customPracticeTests ?? []).filter((test) => test.id !== id)
+    }));
+  };
+
+  const handleDeleteRealTest = (id) => {
+    updateCurrentStudent((student) => ({
+      realTests: (student.realTests ?? []).filter((test) => test.id !== id)
+    }));
+  };
+
+  const handleDeleteStudent = () => {
+    if (!selectedStudent) {
+      return;
+    }
+    if (!window.confirm(`Erase all records for ${selectedStudent.name}? This cannot be undone without using Undo.`)) {
+      return;
+    }
+    prepareUndoSnapshot();
+    const remaining = students.filter((student) => student.id !== selectedStudent.id);
+    setStudents(remaining.map((student) => ensureStudentShape(student)));
+    const nextId = remaining[0]?.id ?? '';
+    setSelectedStudentId(nextId);
+    setShowStudentAnalytics(false);
+  };
+
   const persistWorksheetResult = (gradeResult) => {
     if (!selectedKey || !selectedStudent) {
       return;
