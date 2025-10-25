@@ -3,38 +3,44 @@ const VALID_CHOICES = new Set(['A', 'B', 'C', 'D', 'E']);
 function scanAnswerPairs(text) {
   const pairs = [];
   const source = String(text ?? '');
-  const regex = /(\d{1,3})\s*(?:[\.\)\-:]*\s*)?([A-Za-z])/g;
 
   if (!source.trim()) {
     return pairs;
   }
 
+  // First, find all question numbers and their answers
+  // Pattern: number followed by colon and answer (or blank/question mark/etc)
+  const regex = /(\d{1,3})\s*:\s*([^\n\r]*?)(?=\n|\r|$|\d+\s*:)/g;
+
   let match;
   while ((match = regex.exec(source)) !== null) {
-    const [token, numberRaw, answerRaw] = match;
-    const index = match.index;
-    const end = index + token.length;
-    const before = index > 0 ? source[index - 1] : '';
-    const after = end < source.length ? source[end] : '';
-
-    if (/[A-Za-z0-9]/.test(before)) {
-      continue;
-    }
-
-    if (/[A-Za-z]/.test(after)) {
-      continue;
-    }
-
+    const [fullMatch, numberRaw, answerRaw] = match;
     const number = Number.parseInt(numberRaw, 10);
+    
     if (Number.isNaN(number)) {
       continue;
     }
 
-    pairs.push({
-      question: number,
-      answer: answerRaw.toUpperCase(),
-      raw: token.trim()
-    });
+    const answer = answerRaw.trim();
+    
+    // If answer is blank, empty, or contains non-answer characters, mark for manual review
+    if (!answer || answer === '' || answer === '?' || answer === 'x' || answer === 'X' || 
+        answer.toLowerCase() === 'blank' || answer.toLowerCase() === 'skip' ||
+        !/^[A-E]$/i.test(answer)) {
+      pairs.push({
+        question: number,
+        answer: answer || 'blank',
+        raw: fullMatch.trim(),
+        needsManualReview: true
+      });
+    } else {
+      pairs.push({
+        question: number,
+        answer: answer.toUpperCase(),
+        raw: fullMatch.trim(),
+        needsManualReview: false
+      });
+    }
   }
 
   return pairs;
@@ -75,8 +81,17 @@ export function parseStudentAnswers(text) {
   const entries = scanAnswerPairs(text);
 
   for (const entry of entries) {
-    const { question, answer } = entry;
+    const { question, answer, needsManualReview } = entry;
 
+    // If this entry needs manual review (blank, ?, x, etc.)
+    if (needsManualReview) {
+      const manualEntry = ensureManual(manualMap, question);
+      manualEntry.reasons.add('Non-standard answer format');
+      manualEntry.answers.add(answer);
+      continue;
+    }
+
+    // If answer is not a valid choice
     if (!VALID_CHOICES.has(answer)) {
       const manualEntry = ensureManual(manualMap, question);
       manualEntry.reasons.add('Answer outside A-E');
@@ -84,11 +99,13 @@ export function parseStudentAnswers(text) {
       continue;
     }
 
+    // If we already have this question in manual review
     if (manualMap.has(question)) {
       manualMap.get(question).answers.add(answer);
       continue;
     }
 
+    // If we already have this question answered
     if (answerMap.has(question)) {
       const manualEntry = ensureManual(manualMap, question);
       manualEntry.reasons.add('Duplicate answers provided');

@@ -48,7 +48,8 @@ export const BLUEBOOK_TESTS = [
   { id: 'BB06', label: 'Bluebook 06' },
   { id: 'BB07', label: 'Bluebook 07' },
   { id: 'BB08', label: 'Bluebook 08' },
-  { id: 'BB09', label: 'Bluebook 09' }
+  { id: 'BB09', label: 'Bluebook 09' },
+  { id: 'BB10', label: 'Bluebook 10' }
 ];
 
 export const COURSE_GUIDELINES = [

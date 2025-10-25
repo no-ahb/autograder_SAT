@@ -156,18 +156,41 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
                           <p className="text-xs text-slate-500">
-                            Completed {formatDate(record.date)} · {record.correct}/{record.denominator}{' '}
-                            ({percentDisplay(record.percent)})
+                            {(() => {
+                              const totalAttempted = Object.keys(record.questionStats || {}).length;
+                              const correctCount = record.correct || 0;
+                              const totalQuestions = meta.total || meta.key?.size || 0;
+                              const remainingQuestions = totalQuestions - totalAttempted;
+                              const percent = totalAttempted > 0 ? (correctCount / totalAttempted) * 100 : 0;
+                              
+                              let colorClass = 'text-slate-500';
+                              if (percent >= 90) colorClass = 'text-emerald-600';
+                              else if (percent >= 70) colorClass = 'text-amber-600';
+                              else if (percent > 0) colorClass = 'text-rose-600';
+                              
+                              return (
+                                <>
+                                  <span className="font-medium">{totalAttempted} questions completed {formatDate(record.date)}</span>
+                                  <br />
+                                  <span className={colorClass}>
+                                    {correctCount}/{totalAttempted} ({percent.toFixed(0)}%) correct
+                                  </span>
+                                  {remainingQuestions > 0 && (
+                                    <>
+                                      <br />
+                                      <span className="text-slate-400">{remainingQuestions} questions remaining on worksheet</span>
+                                    </>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </p>
                         </div>
-                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                          #{meta.number}
-                        </span>
                       </div>
                       {record.incorrect?.length ? (
                         <details className="mt-2 text-xs text-slate-600">
                           <summary className="cursor-pointer font-semibold text-slate-500">
-                            Incorrect ({record.incorrect.length})
+                            Missed ({record.incorrect.length})
                           </summary>
                           <ul className="mt-1 space-y-1">
                           {record.incorrect.map((item) => (
@@ -195,6 +218,68 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                           </ul>
                         </details>
                       ) : null}
+                      {(() => {
+                        // Calculate unassigned questions
+                        const totalQuestions = meta.total || meta.key?.size || 0;
+                        const attemptedQuestions = new Set();
+                        
+                        // Add questions from incorrect answers
+                        if (record.incorrect) {
+                          record.incorrect.forEach(item => attemptedQuestions.add(item.question));
+                        }
+                        
+                        // Add questions from manual review
+                        if (record.manualReview) {
+                          record.manualReview.forEach(item => attemptedQuestions.add(item.question));
+                        }
+                        
+                        // Add questions from correct answers (we need to calculate this from the record)
+                        const questionStats = record.questionStats || {};
+                        Object.keys(questionStats).forEach(q => {
+                          const questionNum = parseInt(q);
+                          if (!isNaN(questionNum)) {
+                            attemptedQuestions.add(questionNum);
+                          }
+                        });
+                        
+                        const unassignedQuestions = [];
+                        for (let i = 1; i <= totalQuestions; i++) {
+                          if (!attemptedQuestions.has(i)) {
+                            unassignedQuestions.push(i);
+                          }
+                        }
+                        
+                        return unassignedQuestions.length > 0 ? (
+                          <details className="mt-2 text-xs text-slate-600">
+                            <summary className="cursor-pointer font-semibold text-slate-500">
+                              Unassigned ({unassignedQuestions.length})
+                            </summary>
+                            <div className="mt-1 text-slate-500">
+                              Questions: {unassignedQuestions.join(', ')}
+                            </div>
+                          </details>
+                        ) : null;
+                      })()}
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id={`reviewed-${record.id ?? record.date}`}
+                          checked={record.reviewedMisses || false}
+                          onChange={(e) => {
+                            onUpdate((student) => ({
+                              worksheets: (student.worksheets || []).map(w => 
+                                w.worksheetId === record.worksheetId 
+                                  ? { ...w, reviewedMisses: e.target.checked }
+                                  : w
+                              )
+                            }));
+                          }}
+                          className="size-3 rounded border-slate-300 text-blue-600 focus:ring-blue-200"
+                        />
+                        <label htmlFor={`reviewed-${record.id ?? record.date}`} className="text-xs text-slate-600">
+                          Reviewed misses in class?
+                        </label>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -204,28 +289,6 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
         })}
       </div>
 
-      <div className="mt-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Unassigned Worksheets
-        </p>
-        <div className="mt-2 grid gap-2 text-xs text-slate-500">
-          {unassignedList.length === 0 ? (
-            <p>All worksheets assigned.</p>
-          ) : (
-            unassignedList.slice(0, 12).map((item) => (
-              <span
-                key={item.id}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1"
-              >
-                {item.label}
-                <span className="rounded-full bg-slate-100 px-2 py-px text-[10px] uppercase tracking-wide text-slate-500">
-                  {PRIORITY_LEVELS[WORKSHEET_PRIORITY[item.id] ?? 'low'] ?? 'Worksheet'}
-                </span>
-              </span>
-            ))
-          )}
-        </div>
-      </div>
 
       <TopicChecklist student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
     </section>
@@ -236,7 +299,8 @@ function PracticeTestsColumn({
   student,
   onAddCustomPractice,
   onUpdatePractice,
-  onUpdateCustomPractice
+  onUpdateCustomPractice,
+  onDeleteCustomPractice
 }) {
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
@@ -334,14 +398,24 @@ function PracticeTestsColumn({
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-semibold text-slate-700">{test.label}</span>
-                  <input
-                    type="date"
-                    value={test.date ?? ''}
-                    onChange={(event) =>
-                      onUpdateCustomPractice(test.id, 'date', event.target.value)
-                    }
-                    className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={test.date ?? ''}
+                      onChange={(event) =>
+                        onUpdateCustomPractice(test.id, 'date', event.target.value)
+                      }
+                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onDeleteCustomPractice(test.id)}
+                      className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
+                    >
+                      <X className="size-3" aria-hidden />
+                      Delete
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2">
                   <label className="flex flex-col gap-1">
@@ -396,7 +470,7 @@ function PracticeTestsColumn({
   );
 }
 
-function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTest }) {
+function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTest, onDeleteRealTest }) {
   const realTests = student.realTests ?? [];
   const completedOfficial = realTests.filter((item) => item.status === 'completed');
   const upcomingOfficial = realTests.filter((item) => item.status !== 'completed');
@@ -439,15 +513,25 @@ function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTes
                     <li key={test.id} className="rounded-lg border border-slate-100 bg-white p-2">
                       <div className="flex items-center justify-between gap-2">
                         <span>{formatDate(test.date)}</span>
-                        <input
-                          type="number"
-                          placeholder="Composite"
-                          value={test.composite ?? ''}
-                          onChange={(event) =>
-                            onUpdateRealTest(test.id, 'composite', event.target.value)
-                          }
-                          className="w-24 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            placeholder="Composite"
+                            value={test.composite ?? ''}
+                            onChange={(event) =>
+                              onUpdateRealTest(test.id, 'composite', event.target.value)
+                            }
+                            className="w-24 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => onDeleteRealTest(test.id)}
+                            className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
+                          >
+                            <X className="size-3" aria-hidden />
+                            Delete
+                          </button>
+                        </div>
                       </div>
                       <div className="mt-2 grid grid-cols-2 gap-2">
                         <label className="flex flex-col gap-1">
@@ -492,16 +576,26 @@ function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTes
                           }
                           className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
                         />
-                        <select
-                          value={test.status ?? 'upcoming'}
-                          onChange={(event) =>
-                            onUpdateRealTest(test.id, 'status', event.target.value)
-                          }
-                          className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                        >
-                          <option value="upcoming">Scheduled</option>
-                          <option value="completed">Completed</option>
-                        </select>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={test.status ?? 'upcoming'}
+                            onChange={(event) =>
+                              onUpdateRealTest(test.id, 'status', event.target.value)
+                            }
+                            className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                          >
+                            <option value="upcoming">Scheduled</option>
+                            <option value="completed">Completed</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteRealTest(test.id)}
+                            className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
+                          >
+                            <X className="size-3" aria-hidden />
+                            Delete
+                          </button>
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -526,7 +620,7 @@ function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTes
   );
 }
 
-function ReferenceColumn() {
+function ReferenceColumn({ onDeleteStudent }) {
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
       <h2 className="text-sm font-semibold text-slate-800">Reference</h2>
@@ -594,6 +688,21 @@ function ReferenceColumn() {
           </details>
         ))}
       </div>
+      
+      <div className="mt-6 pt-4 border-t border-red-200">
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm(`Are you sure you want to permanently delete all records for ${student.name}? This action cannot be undone.`)) {
+              onDeleteStudent();
+            }
+          }}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-full border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 transition hover:border-red-400 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
+        >
+          <X className="size-4" aria-hidden />
+          Erase Student Record
+        </button>
+      </div>
     </section>
   );
 }
@@ -606,8 +715,11 @@ export function StudentAnalytics({
   onAddCustomPractice,
   onUpdatePractice,
   onUpdateCustomPractice,
+  onDeleteCustomPractice,
   onAddRealTest,
-  onUpdateRealTest
+  onUpdateRealTest,
+  onDeleteRealTest,
+  onDeleteStudent
 }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-white to-rose-50 pb-16 text-slate-900">
@@ -634,7 +746,7 @@ export function StudentAnalytics({
       </header>
 
       <main className="mx-auto mt-6 max-w-6xl px-4">
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-8 lg:grid-cols-[1.2fr_1fr_0.8fr]">
           <div className="space-y-4">
             <WorksheetsColumn student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
           </div>
@@ -644,6 +756,7 @@ export function StudentAnalytics({
               onAddCustomPractice={onAddCustomPractice}
               onUpdatePractice={onUpdatePractice}
               onUpdateCustomPractice={onUpdateCustomPractice}
+              onDeleteCustomPractice={onDeleteCustomPractice}
             />
           </div>
           <div className="space-y-4">
@@ -652,8 +765,9 @@ export function StudentAnalytics({
               onUpdate={onUpdate}
               onAddRealTest={onAddRealTest}
               onUpdateRealTest={onUpdateRealTest}
+              onDeleteRealTest={onDeleteRealTest}
             />
-            <ReferenceColumn />
+            <ReferenceColumn onDeleteStudent={onDeleteStudent} />
           </div>
         </div>
       </main>

@@ -611,8 +611,11 @@ export default function App() {
         onAddCustomPractice={handleAddCustomPractice}
         onUpdatePractice={handleUpdatePractice}
         onUpdateCustomPractice={handleUpdateCustomPractice}
+        onDeleteCustomPractice={handleDeleteCustomPractice}
         onAddRealTest={handleAddRealTest}
         onUpdateRealTest={handleUpdateRealTest}
+        onDeleteRealTest={handleDeleteRealTest}
+        onDeleteStudent={handleDeleteStudent}
       />
     );
   }
