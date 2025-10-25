@@ -310,6 +310,9 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [showStudentAnalytics, setShowStudentAnalytics] = useState(false);
+  const [undoSnapshot, setUndoSnapshot] = useState(null);
+  const [studentSearchTerm, setStudentSearchTerm] = useState('');
+  const [showStudentSuggestions, setShowStudentSuggestions] = useState(false);
   const confettiTimerRef = useRef(null);
 
   useEffect(
@@ -349,6 +352,45 @@ export default function App() {
     () => students.find((student) => student.id === selectedStudentId) ?? null,
     [students, selectedStudentId]
   );
+
+  const filteredStudents = useMemo(() => {
+    const term = studentSearchTerm.trim().toLowerCase();
+    if (!term) {
+      return students.slice(0, 8);
+    }
+    return students
+      .filter((student) => student.name.toLowerCase().includes(term))
+      .slice(0, 8);
+  }, [studentSearchTerm, students]);
+
+  useEffect(() => {
+    if (selectedStudent) {
+      setStudentSearchTerm(selectedStudent.name);
+    } else {
+      setStudentSearchTerm('');
+    }
+  }, [selectedStudent?.name]);
+
+  const handleStudentSelect = (student) => {
+    setSelectedStudentId(student.id);
+    setStudentSearchTerm(student.name);
+    setShowStudentSuggestions(false);
+  };
+
+  const handleStudentInputKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      if (filteredStudents.length > 0) {
+        handleStudentSelect(filteredStudents[0]);
+        event.preventDefault();
+      }
+    } else if (event.key === 'Escape') {
+      setShowStudentSuggestions(false);
+    }
+  };
+
+  const handleStudentInputBlur = () => {
+    window.setTimeout(() => setShowStudentSuggestions(false), 120);
+  };
 
   const updateCurrentStudent = (mutator) => {
     if (!selectedStudentId) {
@@ -465,35 +507,146 @@ export default function App() {
     setShowStudentAnalytics(false);
   };
 
-  const persistWorksheetResult = (gradeResult) => {
+  const prepareUndoSnapshot = () => {
+    setUndoSnapshot({
+      students: JSON.parse(JSON.stringify(students)),
+      selectedStudentId,
+      selectedKeyId,
+      studentInput,
+      result
+    });
+  };
+
+  const handleUndo = () => {
+    if (!undoSnapshot) {
+      return;
+    }
+    const restoredStudents = (undoSnapshot.students ?? []).map((student) =>
+      ensureStudentShape(student)
+    );
+    setStudents(restoredStudents);
+    setSelectedStudentId(undoSnapshot.selectedStudentId);
+    setSelectedKeyId(undoSnapshot.selectedKeyId);
+    setStudentInput(undoSnapshot.studentInput);
+    setResult(undoSnapshot.result);
+    setUndoSnapshot(null);
+    setShowStudentAnalytics(false);
+  };
+
+  const undoAvailable = Boolean(undoSnapshot);
+
+  const persistWorksheetResult = (gradeResult, parsedAnswers) => {
     if (!selectedKey || !selectedStudent) {
       return;
     }
-    const entry = {
-      id: `worksheet-${Date.now()}`,
-      worksheetId: selectedKey.id,
-      worksheetLabel: selectedKey.label,
-      date: new Date().toISOString(),
-      correct: gradeResult.correct,
-      denominator: gradeResult.denominator,
-      total: gradeResult.total,
-      skipMissing,
-      percent: gradeResult.percent,
-      incorrect: gradeResult.incorrect,
-      manualReview: gradeResult.manualReview,
-      missingQuestions: gradeResult.missing
-    };
-
+    
+    prepareUndoSnapshot();
+    
     updateCurrentStudent((student) => {
       const worksheets = Array.isArray(student.worksheets) ? [...student.worksheets] : [];
       const existingIndex = worksheets.findIndex(
         (item) => item.worksheetId === selectedKey.id
       );
+
+      // Create new question stats from current grading
+      const newQuestionStats = {};
+      const attemptedQuestions = new Set();
+      
+      // Add correct answers
+      gradeResult.attemptedQuestions?.forEach(q => {
+        attemptedQuestions.add(q);
+        newQuestionStats[q] = {
+          status: 'correct',
+          studentAnswer: parsedAnswers.answers?.get(q) || '',
+          correctAnswer: selectedKey.key.get(q) || '',
+          attempts: 1,
+          lastUpdated: new Date().toISOString()
+        };
+      });
+      
+      // Add incorrect answers
+      gradeResult.incorrect?.forEach(item => {
+        attemptedQuestions.add(item.question);
+        newQuestionStats[item.question] = {
+          status: 'incorrect',
+          studentAnswer: item.studentAnswer,
+          correctAnswer: item.correctAnswer,
+          attempts: 1,
+          lastUpdated: new Date().toISOString()
+        };
+      });
+      
+      // Add manual review
+      gradeResult.manualReview?.forEach(item => {
+        attemptedQuestions.add(item.question);
+        newQuestionStats[item.question] = {
+          status: 'manual',
+          studentAnswer: item.answers?.[0] || '',
+          correctAnswer: selectedKey.key.get(item.question) || '',
+          manualAnswers: item.answers || [],
+          manualReasons: item.reasons || [],
+          attempts: 1,
+          lastUpdated: new Date().toISOString()
+        };
+      });
+
+      let entry;
+      if (existingIndex >= 0) {
+        // Merge with existing data - take most recent attempt for each question
+        const existing = worksheets[existingIndex];
+        const mergedQuestionStats = { ...existing.questionStats };
+        
+        // Update with new data, keeping most recent attempts
+        Object.entries(newQuestionStats).forEach(([q, newStats]) => {
+          const existingStats = mergedQuestionStats[q];
+          if (!existingStats || new Date(newStats.lastUpdated) > new Date(existingStats.lastUpdated)) {
+            mergedQuestionStats[q] = newStats;
+          }
+        });
+        
+        // Calculate cumulative statistics
+        const allQuestions = Object.keys(mergedQuestionStats);
+        const correctCount = allQuestions.filter(q => mergedQuestionStats[q].status === 'correct').length;
+        const incorrectCount = allQuestions.filter(q => mergedQuestionStats[q].status === 'incorrect').length;
+        const manualCount = allQuestions.filter(q => mergedQuestionStats[q].status === 'manual').length;
+        const totalAttempted = allQuestions.length;
+        const percent = totalAttempted > 0 ? (correctCount / totalAttempted) * 100 : 0;
+        
+        entry = {
+          ...existing,
+          questionStats: mergedQuestionStats,
+          correct: correctCount,
+          incorrectCount,
+          manualReviewCount: manualCount,
+          totalAttempted,
+          percent,
+          lastUpdated: new Date().toISOString()
+        };
+      } else {
+        // New worksheet entry
+        entry = {
+          id: `worksheet-${Date.now()}`,
+          worksheetId: selectedKey.id,
+          worksheetLabel: selectedKey.label,
+          totalQuestions: selectedKey.total,
+          questionStats: newQuestionStats,
+          correct: gradeResult.correct,
+          incorrectCount: gradeResult.incorrectCount,
+          manualReviewCount: gradeResult.manualReviewCount,
+          totalAttempted: attemptedQuestions.size,
+          percent: gradeResult.percent,
+          skipMissingUsed: skipMissing,
+          reviewedMisses: false,
+          lastUpdated: new Date().toISOString()
+        };
+      }
+
       if (existingIndex >= 0) {
         worksheets[existingIndex] = entry;
       } else {
         worksheets.unshift(entry);
       }
+      
       return {
         worksheets,
         topicChecklist: {
@@ -564,7 +717,7 @@ export default function App() {
         skipMissing
       });
 
-      persistWorksheetResult(gradeResult);
+      persistWorksheetResult(gradeResult, parsedAnswers);
 
       const report = formatReport({
         ...gradeResult,
@@ -666,26 +819,48 @@ export default function App() {
             <div className="grid gap-4">
               <div className="space-y-2">
                 <span className="text-sm font-medium text-slate-600">Student</span>
-                {students.length > 0 ? (
-                  <motion.select
-                    value={selectedStudentId}
-                    onChange={(event) => setSelectedStudentId(event.target.value)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    whileHover={{ scale: 1.01 }}
+                <div className="relative">
+                  <motion.input
+                    value={studentSearchTerm}
+                    onChange={(event) => {
+                      setStudentSearchTerm(event.target.value);
+                      setShowStudentSuggestions(true);
+                    }}
+                    onFocus={() => setShowStudentSuggestions(true)}
+                    onKeyDown={handleStudentInputKeyDown}
+                    onBlur={handleStudentInputBlur}
+                    placeholder={students.length === 0 ? 'Add a student to begin' : 'Search students'}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-sm text-slate-900 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     whileFocus={{ scale: 1.01 }}
-                    aria-label="Select student"
-                  >
-                    {students.map((student) => (
-                      <option key={student.id} value={student.id}>
-                        {student.name}
-                      </option>
-                    ))}
-                  </motion.select>
-                ) : (
+                    aria-label="Search students"
+                  />
+                  {showStudentSuggestions && filteredStudents.length > 0 ? (
+                    <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-xl">
+                      {filteredStudents.map((student) => (
+                        <li key={student.id}>
+                          <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => handleStudentSelect(student)}
+                            className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                              student.id === selectedStudentId ? 'bg-blue-50 text-blue-600' : 'text-slate-600'
+                            }`}
+                          >
+                            <span>{student.name}</span>
+                            {student.id === selectedStudentId ? (
+                              <span className="text-[11px] uppercase text-blue-500">current</span>
+                            ) : null}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+                {students.length === 0 ? (
                   <p className="text-xs text-slate-500">
                     Add a student to start tracking worksheets and tests.
                   </p>
-                )}
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <motion.button
                     type="button"
@@ -814,6 +989,16 @@ export default function App() {
                   whileTap={{ scale: 0.96 }}
                 >
                   Clear
+                </motion.button>
+                <motion.button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={!undoAvailable}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition enabled:hover:border-slate-300 enabled:hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  whileHover={!undoAvailable ? undefined : { scale: 1.04, translateY: -2 }}
+                  whileTap={!undoAvailable ? undefined : { scale: 0.96 }}
+                >
+                  Undo
                 </motion.button>
                 <motion.button
                   type="button"

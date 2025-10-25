@@ -32,50 +32,81 @@ function percentDisplay(value) {
 function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
   const checklist = student.topicChecklist ?? {};
 
+  // Group worksheets by subject and priority
+  const groupedWorksheets = useMemo(() => {
+    const groups = {
+      english: { high: [], medium: [], low: [] },
+      math: { high: [], medium: [], low: [] }
+    };
+    
+    worksheetsMeta.forEach(item => {
+      const priority = WORKSHEET_PRIORITY[item.id] || 'low';
+      const subject = item.id.startsWith('english') ? 'english' : 'math';
+      groups[subject][priority].push(item);
+    });
+    
+    return groups;
+  }, [worksheetsMeta]);
+
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-800">Topic checklist</h3>
         <ClipboardCopy className="size-4 text-slate-400" aria-hidden />
       </div>
-      <div className="mt-3 space-y-3">
-        {TOPIC_PRIORITY_ORDER.map((priorityKey) => {
-          const worksheetsForPriority = worksheetsMeta.filter(
-            (item) => WORKSHEET_PRIORITY[item.id] === priorityKey
-          );
-          if (worksheetsForPriority.length === 0) {
-            return null;
-          }
+      <div className="mt-3 space-y-4">
+        {Object.entries(groupedWorksheets).map(([subject, priorities]) => {
+          const hasAnyWorksheets = Object.values(priorities).some(arr => arr.length > 0);
+          if (!hasAnyWorksheets) return null;
+          
           return (
-            <div key={priorityKey} className="rounded-2xl bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {PRIORITY_LEVELS[priorityKey]}
-              </p>
-              <ul className="mt-2 space-y-1 text-xs text-slate-600">
-                {worksheetsForPriority.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-slate-200 hover:bg-white"
-                  >
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(checklist[item.id])}
-                        onChange={(event) => {
-                          const nextChecklist = {
-                            ...(student.topicChecklist ?? {}),
-                            [item.id]: event.target.checked
-                          };
-                          onUpdate(() => ({
-                            topicChecklist: nextChecklist
-                          }));
-                        }}
-                      />
-                      {item.label}
-                    </label>
-                  </li>
-                ))}
-              </ul>
+            <div key={subject} className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className={`h-px flex-1 ${subject === 'english' ? 'bg-blue-200' : 'bg-red-200'}`}></div>
+                <h4 className={`text-xs font-semibold uppercase tracking-wide ${subject === 'english' ? 'text-blue-600' : 'text-red-600'}`}>
+                  {subject === 'english' ? 'English' : 'Math'}
+                </h4>
+                <div className={`h-px flex-1 ${subject === 'english' ? 'bg-blue-200' : 'bg-red-200'}`}></div>
+              </div>
+              
+              {TOPIC_PRIORITY_ORDER.map((priorityKey) => {
+                const worksheetsForPriority = priorities[priorityKey];
+                if (worksheetsForPriority.length === 0) {
+                  return null;
+                }
+                return (
+                  <div key={priorityKey} className={`rounded-2xl p-3 ${subject === 'english' ? 'bg-blue-50' : 'bg-red-50'}`}>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {PRIORITY_LEVELS[priorityKey]}
+                    </p>
+                    <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                      {worksheetsForPriority.map((item) => (
+                        <li
+                          key={item.id}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-slate-200 hover:bg-white"
+                        >
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(checklist[item.id])}
+                              onChange={(event) => {
+                                const nextChecklist = {
+                                  ...(student.topicChecklist ?? {}),
+                                  [item.id]: event.target.checked
+                                };
+                                onUpdate(() => ({
+                                  topicChecklist: nextChecklist
+                                }));
+                              }}
+                            />
+                            {item.label}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -129,7 +160,20 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">Worksheets</h2>
         <p className="text-xs text-slate-500">
-          {assignedList.length} assigned · {unassignedList.length} remaining
+          {(() => {
+            const englishAssigned = assignedList.filter(item => item.meta.id.startsWith('english')).length;
+            const mathAssigned = assignedList.filter(item => item.meta.id.startsWith('math')).length;
+            const englishRemaining = unassignedList.filter(item => item.id.startsWith('english')).length;
+            const mathRemaining = unassignedList.filter(item => item.id.startsWith('math')).length;
+            
+            return (
+              <>
+                <span className="text-blue-600">English: {englishAssigned} assigned · {englishRemaining} remaining</span>
+                <br />
+                <span className="text-red-600">Math: {mathAssigned} assigned · {mathRemaining} remaining</span>
+              </>
+            );
+          })()}
         </p>
       </div>
 
@@ -150,8 +194,39 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                 <p className="mt-1 text-xs text-slate-400">No work logged yet.</p>
               ) : (
                 <ul className="mt-2 space-y-2">
-                  {list.map(({ meta, record }) => (
-                    <li key={record.id ?? record.date} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  {list.map(({ meta, record }) => {
+                    const subject = meta.id.startsWith('english') ? 'english' : 'math';
+                    const priority = WORKSHEET_PRIORITY[meta.id] || 'low';
+                    
+                    let bgColor = 'bg-slate-50';
+                    let borderColor = 'border-slate-100';
+                    
+                    if (subject === 'english') {
+                      if (priority === 'high') {
+                        bgColor = 'bg-blue-50';
+                        borderColor = 'border-blue-200';
+                      } else if (priority === 'medium') {
+                        bgColor = 'bg-blue-25';
+                        borderColor = 'border-blue-150';
+                      } else {
+                        bgColor = 'bg-blue-10';
+                        borderColor = 'border-blue-100';
+                      }
+                    } else {
+                      if (priority === 'high') {
+                        bgColor = 'bg-red-50';
+                        borderColor = 'border-red-200';
+                      } else if (priority === 'medium') {
+                        bgColor = 'bg-red-25';
+                        borderColor = 'border-red-150';
+                      } else {
+                        bgColor = 'bg-red-10';
+                        borderColor = 'border-red-100';
+                      }
+                    }
+                    
+                    return (
+                    <li key={record.id ?? record.date} className={`rounded-xl border ${borderColor} ${bgColor} p-3`}>
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
@@ -281,7 +356,8 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                         </label>
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </div>
