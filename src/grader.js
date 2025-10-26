@@ -9,19 +9,25 @@ function scanAnswerPairs(text) {
   }
 
   // First, find all question numbers and their answers
-  // Pattern: number followed by colon and answer (or blank/question mark/etc)
-  const regex = /(\d{1,3})\s*:\s*([^\n\r]*?)(?=\n|\r|$|\d+\s*:)/g;
+  // Pattern: number followed by colon/period/paren/hyphen and answer
+  const markers = Array.from(source.matchAll(/(\d{1,3})\s*(?:[:.]|\)|-)/g));
 
-  let match;
-  while ((match = regex.exec(source)) !== null) {
-    const [fullMatch, numberRaw, answerRaw] = match;
+  markers.forEach((marker, index) => {
+    const numberRaw = marker[1];
+    const start = marker.index + marker[0].length;
+    const end = index + 1 < markers.length ? markers[index + 1].index : source.length;
+    const fullMatch = source.slice(marker.index, end);
+    const answerRaw = source
+      .slice(start, end)
+      .split(/\n|\r/)
+      .shift() ?? '';
     const number = Number.parseInt(numberRaw, 10);
     
     if (Number.isNaN(number)) {
-      continue;
+      return;
     }
 
-    const answer = answerRaw.trim();
+    const answer = answerRaw.replace(/^[).:\-\s]+/, '').trim();
     
     // If answer is blank, empty, or contains non-answer characters, mark for manual review
     if (!answer || answer === '' || answer === '?' || answer === 'x' || answer === 'X' || 
@@ -41,7 +47,7 @@ function scanAnswerPairs(text) {
         needsManualReview: false
       });
     }
-  }
+  });
 
   return pairs;
 }

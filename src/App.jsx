@@ -309,6 +309,7 @@ export default function App() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [students, setStudents] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [autoSelectStudent, setAutoSelectStudent] = useState(true);
   const [showStudentAnalytics, setShowStudentAnalytics] = useState(false);
   const [undoSnapshot, setUndoSnapshot] = useState(null);
   const [studentSearchTerm, setStudentSearchTerm] = useState('');
@@ -334,13 +335,19 @@ export default function App() {
 
   useEffect(() => {
     if (students.length === 0) {
-      setSelectedStudentId('');
+      if (selectedStudentId !== '') {
+        setSelectedStudentId('');
+      }
       return;
     }
     if (!students.some((student) => student.id === selectedStudentId)) {
-      setSelectedStudentId(students[0].id);
+      if (autoSelectStudent) {
+        setSelectedStudentId(students[0].id);
+      } else if (selectedStudentId !== '') {
+        setSelectedStudentId('');
+      }
     }
-  }, [students, selectedStudentId]);
+  }, [students, selectedStudentId, autoSelectStudent]);
 
   useEffect(() => {
     saveStudents(students);
@@ -372,6 +379,7 @@ export default function App() {
   }, [selectedStudent?.name]);
 
   const handleStudentSelect = (student) => {
+    setAutoSelectStudent(true);
     setSelectedStudentId(student.id);
     setStudentSearchTerm(student.name);
     setShowStudentSuggestions(false);
@@ -419,6 +427,7 @@ export default function App() {
     }
     const newStudent = createStudent(name.trim());
     setStudents((prev) => [...prev, newStudent]);
+    setAutoSelectStudent(true);
     setSelectedStudentId(newStudent.id);
     setShowStudentAnalytics(false);
   };
@@ -502,8 +511,14 @@ export default function App() {
     prepareUndoSnapshot();
     const remaining = students.filter((student) => student.id !== selectedStudent.id);
     setStudents(remaining.map((student) => ensureStudentShape(student)));
-    const nextId = remaining[0]?.id ?? '';
-    setSelectedStudentId(nextId);
+    setAutoSelectStudent(false);
+    setSelectedStudentId('');
+    setStudentInput('');
+    setFileName('');
+    setResult(null);
+    setCopyStatus('');
+    setError(null);
+    setShowConfetti(false);
     setShowStudentAnalytics(false);
   };
 
@@ -525,6 +540,7 @@ export default function App() {
       ensureStudentShape(student)
     );
     setStudents(restoredStudents);
+    setAutoSelectStudent(true);
     setSelectedStudentId(undoSnapshot.selectedStudentId);
     setSelectedKeyId(undoSnapshot.selectedKeyId);
     setStudentInput(undoSnapshot.studentInput);

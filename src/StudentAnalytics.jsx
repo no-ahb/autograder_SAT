@@ -62,20 +62,20 @@ function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
 
           return (
             <div key={priorityKey} className="rounded-2xl bg-slate-50 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {PRIORITY_LEVELS[priorityKey]}
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">English</p>
+                <div className="rounded-2xl bg-blue-50 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-500">English</p>
                   {englishItems.length === 0 ? (
-                    <p className="mt-2 text-xs text-slate-400">None</p>
+                    <p className="mt-2 text-xs text-blue-400">None</p>
                   ) : (
                     <ul className="mt-2 space-y-1 text-xs text-slate-600">
                       {englishItems.map((item) => (
                         <li
                           key={item.id}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-slate-200 hover:bg-white"
+                          className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-blue-200 hover:bg-white"
                         >
                           <label className="flex items-center gap-2">
                             <input
@@ -96,16 +96,16 @@ function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
                     </ul>
                   )}
                 </div>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Math</p>
+                <div className="rounded-2xl bg-red-50 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-red-500">Math</p>
                   {mathItems.length === 0 ? (
-                    <p className="mt-2 text-xs text-slate-400">None</p>
+                    <p className="mt-2 text-xs text-red-400">None</p>
                   ) : (
                     <ul className="mt-2 space-y-1 text-xs text-slate-600">
                       {mathItems.map((item) => (
                         <li
                           key={item.id}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-slate-200 hover:bg-white"
+                          className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-red-200 hover:bg-white"
                         >
                           <label className="flex items-center gap-2">
                             <input
@@ -148,10 +148,17 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     () =>
       worksheetsMeta
         .filter((item) => worksheetMap.has(item.id))
-        .map((item) => ({
-          meta: item,
-          record: worksheetMap.get(item.id)
-        }))
+        .map((item) => {
+          const record = worksheetMap.get(item.id);
+          const subject = item.id.startsWith('math') ? 'math' : 'english';
+          const priority = WORKSHEET_PRIORITY[item.id] ?? 'other';
+          return {
+            meta: item,
+            record,
+            subject,
+            priority
+          };
+        })
         .sort((a, b) => {
           const dateA = a.record?.date ?? '';
           const dateB = b.record?.date ?? '';
@@ -167,30 +174,207 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
   );
 
   const assignedByPriority = useMemo(() => {
-    const grouped = { high: [], medium: [], low: [], other: [] };
+    const grouped = {};
+    for (const priority of PRIORITY_ORDER) {
+      grouped[priority] = { english: [], math: [] };
+    }
     for (const item of assignedList) {
-      const priority = WORKSHEET_PRIORITY[item.meta.id] ?? 'other';
-      grouped[priority].push(item);
+      const priority = PRIORITY_ORDER.includes(item.priority) ? item.priority : 'other';
+      const bucket = grouped[priority] ?? grouped.other;
+      bucket[item.subject].push(item);
     }
     return grouped;
   }, [assignedList]);
 
+  const SubjectPanel = ({ subject, items }) => {
+    const isEnglish = subject === 'english';
+    const panelClasses = isEnglish
+      ? 'border-blue-100 bg-blue-50'
+      : 'border-rose-100 bg-rose-50';
+    const headingClasses = isEnglish ? 'text-blue-600' : 'text-rose-600';
+    const emptyClasses = isEnglish ? 'text-blue-400' : 'text-rose-400';
+    const hoverClasses = isEnglish ? 'hover:border-blue-200' : 'hover:border-rose-200';
+
+    return (
+      <div className={`rounded-2xl border ${panelClasses} p-3`}>
+        <p className={`text-[11px] font-semibold uppercase tracking-wide ${headingClasses}`}>
+          {isEnglish ? 'English' : 'Math'}
+        </p>
+        {items.length === 0 ? (
+          <p className={`mt-2 text-xs ${emptyClasses}`}>None assigned yet.</p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {items.map(({ meta, record }) => (
+              <li
+                key={record.id ?? record.date}
+                className={`rounded-xl border border-white/70 bg-white p-3 text-xs text-slate-600 shadow-sm transition ${hoverClasses}`}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
+                    <p className="text-xs text-slate-500">
+                      {(() => {
+                        const totalAttempted = Object.keys(record.questionStats || {}).length;
+                        const correctCount = record.correct || 0;
+                        const totalQuestions = meta.total || meta.key?.size || 0;
+                        const remainingQuestions = Math.max(totalQuestions - totalAttempted, 0);
+                        const percent =
+                          totalAttempted > 0 ? (correctCount / totalAttempted) * 100 : 0;
+
+                        let colorClass = 'text-slate-500';
+                        if (percent >= 90) {
+                          colorClass = 'text-emerald-600';
+                        } else if (percent >= 70) {
+                          colorClass = 'text-amber-600';
+                        } else if (percent > 0) {
+                          colorClass = 'text-rose-600';
+                        }
+
+                        return (
+                          <>
+                            <span className="font-medium">
+                              {totalAttempted} questions completed {formatDate(record.date)}
+                            </span>
+                            <br />
+                            <span className={colorClass}>
+                              {correctCount}/{totalAttempted} ({percent.toFixed(0)}%) correct
+                            </span>
+                            {remainingQuestions > 0 && (
+                              <>
+                                <br />
+                                <span className="text-slate-400">
+                                  {remainingQuestions} questions remaining on worksheet
+                                </span>
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </p>
+                  </div>
+                </div>
+                {record.incorrect?.length ? (
+                  <details className="mt-2 text-xs text-slate-600">
+                    <summary className="cursor-pointer font-semibold text-slate-500">
+                      Missed ({record.incorrect.length})
+                    </summary>
+                    <ul className="mt-1 space-y-1">
+                      {record.incorrect.map((item) => (
+                        <li key={`${item.question}-${item.studentAnswer}`}>
+                          Question {item.question}: {item.studentAnswer}
+                          {' -> '}
+                          {item.correctAnswer}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+                {record.manualReview?.length ? (
+                  <details className="mt-2 text-xs text-slate-600">
+                    <summary className="cursor-pointer font-semibold text-slate-500">
+                      Manual review ({record.manualReview.length})
+                    </summary>
+                    <ul className="mt-1 space-y-1">
+                      {record.manualReview.map((item) => (
+                        <li key={item.question}>
+                          Question {item.question}: {item.answers.join(', ')} (
+                          {item.reasons.join('; ')})
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+                {(() => {
+                  const totalQuestions = meta.total || meta.key?.size || 0;
+                  const attemptedQuestions = new Set();
+
+                  if (record.incorrect) {
+                    record.incorrect.forEach((item) => attemptedQuestions.add(item.question));
+                  }
+
+                  if (record.manualReview) {
+                    record.manualReview.forEach((item) => attemptedQuestions.add(item.question));
+                  }
+
+                  const questionStats = record.questionStats || {};
+                  Object.keys(questionStats).forEach((q) => {
+                    const questionNum = Number.parseInt(q, 10);
+                    if (!Number.isNaN(questionNum)) {
+                      attemptedQuestions.add(questionNum);
+                    }
+                  });
+
+                  const unassignedQuestions = [];
+                  for (let i = 1; i <= totalQuestions; i += 1) {
+                    if (!attemptedQuestions.has(i)) {
+                      unassignedQuestions.push(i);
+                    }
+                  }
+
+                  return unassignedQuestions.length > 0 ? (
+                    <details className="mt-2 text-xs text-slate-600">
+                      <summary className="cursor-pointer font-semibold text-slate-500">
+                        Unassigned ({unassignedQuestions.length})
+                      </summary>
+                      <div className="mt-1 text-slate-500">
+                        Questions: {unassignedQuestions.join(', ')}
+                      </div>
+                    </details>
+                  ) : null;
+                })()}
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id={`reviewed-${record.id ?? record.date}`}
+                    checked={record.reviewedMisses || false}
+                    onChange={(event) => {
+                      onUpdate((draft) => ({
+                        worksheets: (draft.worksheets || []).map((worksheet) =>
+                          worksheet.worksheetId === record.worksheetId
+                            ? { ...worksheet, reviewedMisses: event.target.checked }
+                            : worksheet
+                        )
+                      }));
+                    }}
+                    className="size-3 rounded border-slate-300 text-blue-600 focus:ring-blue-200"
+                  />
+                  <label
+                    htmlFor={`reviewed-${record.id ?? record.date}`}
+                    className="text-xs text-slate-600"
+                  >
+                    Reviewed misses in class?
+                  </label>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-slate-900">Worksheets</h2>
         <p className="text-xs text-slate-500">
           {(() => {
-            const englishAssigned = assignedList.filter(item => item.meta.id.startsWith('english')).length;
-            const mathAssigned = assignedList.filter(item => item.meta.id.startsWith('math')).length;
-            const englishRemaining = unassignedList.filter(item => item.id.startsWith('english')).length;
-            const mathRemaining = unassignedList.filter(item => item.id.startsWith('math')).length;
-            
+            const englishAssigned = assignedList.filter((item) => item.subject === 'english').length;
+            const mathAssigned = assignedList.filter((item) => item.subject === 'math').length;
+            const englishRemaining = unassignedList.filter((item) =>
+              item.id.startsWith('english')
+            ).length;
+            const mathRemaining = unassignedList.filter((item) => item.id.startsWith('math')).length;
+
             return (
               <>
-                <span className="text-blue-600">English: {englishAssigned} assigned · {englishRemaining} remaining</span>
+                <span className="text-blue-600">
+                  English: {englishAssigned} assigned · {englishRemaining} remaining
+                </span>
                 <br />
-                <span className="text-red-600">Math: {mathAssigned} assigned · {mathRemaining} remaining</span>
+                <span className="text-rose-600">
+                  Math: {mathAssigned} assigned · {mathRemaining} remaining
+                </span>
               </>
             );
           })()}
@@ -199,192 +383,32 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
 
       <div className="mt-4 space-y-4">
         {PRIORITY_ORDER.map((priorityKey) => {
-          const list = assignedByPriority[priorityKey] ?? [];
-          if (priorityKey !== 'other' && list.length === 0) {
-            return null;
-          }
+          const group = assignedByPriority[priorityKey] ?? { english: [], math: [] };
           const heading =
             priorityKey === 'other' ? 'Additional Worksheets' : PRIORITY_LEVELS[priorityKey];
+          const hasAssignments = group.english.length > 0 || group.math.length > 0;
+
+          if (!hasAssignments && priorityKey !== 'other') {
+            return null;
+          }
+
           return (
-            <div key={priorityKey}>
+            <div key={priorityKey} className="space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {heading}
               </p>
-              {list.length === 0 ? (
-                <p className="mt-1 text-xs text-slate-400">No work logged yet.</p>
+              {hasAssignments ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <SubjectPanel subject="english" items={group.english} />
+                  <SubjectPanel subject="math" items={group.math} />
+                </div>
               ) : (
-                <ul className="mt-2 space-y-2">
-                  {list.map(({ meta, record }) => {
-                    const subject = meta.id.startsWith('english') ? 'english' : 'math';
-                    const priority = WORKSHEET_PRIORITY[meta.id] || 'low';
-                    
-                    let bgColor = 'bg-slate-50';
-                    let borderColor = 'border-slate-100';
-                    
-                    if (subject === 'english') {
-                      if (priority === 'high') {
-                        bgColor = 'bg-blue-50';
-                        borderColor = 'border-blue-200';
-                      } else if (priority === 'medium') {
-                        bgColor = 'bg-blue-25';
-                        borderColor = 'border-blue-150';
-                      } else {
-                        bgColor = 'bg-blue-10';
-                        borderColor = 'border-blue-100';
-                      }
-                    } else {
-                      if (priority === 'high') {
-                        bgColor = 'bg-red-50';
-                        borderColor = 'border-red-200';
-                      } else if (priority === 'medium') {
-                        bgColor = 'bg-red-25';
-                        borderColor = 'border-red-150';
-                      } else {
-                        bgColor = 'bg-red-10';
-                        borderColor = 'border-red-100';
-                      }
-                    }
-                    
-                    return (
-                    <li key={record.id ?? record.date} className={`rounded-xl border ${borderColor} ${bgColor} p-3`}>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
-                          <p className="text-xs text-slate-500">
-                            {(() => {
-                              const totalAttempted = Object.keys(record.questionStats || {}).length;
-                              const correctCount = record.correct || 0;
-                              const totalQuestions = meta.total || meta.key?.size || 0;
-                              const remainingQuestions = totalQuestions - totalAttempted;
-                              const percent = totalAttempted > 0 ? (correctCount / totalAttempted) * 100 : 0;
-                              
-                              let colorClass = 'text-slate-500';
-                              if (percent >= 90) colorClass = 'text-emerald-600';
-                              else if (percent >= 70) colorClass = 'text-amber-600';
-                              else if (percent > 0) colorClass = 'text-rose-600';
-                              
-                              return (
-                                <>
-                                  <span className="font-medium">{totalAttempted} questions completed {formatDate(record.date)}</span>
-                                  <br />
-                                  <span className={colorClass}>
-                                    {correctCount}/{totalAttempted} ({percent.toFixed(0)}%) correct
-                                  </span>
-                                  {remainingQuestions > 0 && (
-                                    <>
-                                      <br />
-                                      <span className="text-slate-400">{remainingQuestions} questions remaining on worksheet</span>
-                                    </>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </p>
-                        </div>
-                      </div>
-                      {record.incorrect?.length ? (
-                        <details className="mt-2 text-xs text-slate-600">
-                          <summary className="cursor-pointer font-semibold text-slate-500">
-                            Missed ({record.incorrect.length})
-                          </summary>
-                          <ul className="mt-1 space-y-1">
-                          {record.incorrect.map((item) => (
-                            <li key={`${item.question}-${item.studentAnswer}`}>
-                              Question {item.question}: {item.studentAnswer}
-                              {' -> '}
-                              {item.correctAnswer}
-                            </li>
-                          ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                      {record.manualReview?.length ? (
-                        <details className="mt-2 text-xs text-slate-600">
-                          <summary className="cursor-pointer font-semibold text-slate-500">
-                            Manual review ({record.manualReview.length})
-                          </summary>
-                          <ul className="mt-1 space-y-1">
-                              {record.manualReview.map((item) => (
-                                <li key={item.question}>
-                                  Question {item.question}: {item.answers.join(', ')} (
-                                  {item.reasons.join('; ')})
-                                </li>
-                              ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                      {(() => {
-                        // Calculate unassigned questions
-                        const totalQuestions = meta.total || meta.key?.size || 0;
-                        const attemptedQuestions = new Set();
-                        
-                        // Add questions from incorrect answers
-                        if (record.incorrect) {
-                          record.incorrect.forEach(item => attemptedQuestions.add(item.question));
-                        }
-                        
-                        // Add questions from manual review
-                        if (record.manualReview) {
-                          record.manualReview.forEach(item => attemptedQuestions.add(item.question));
-                        }
-                        
-                        // Add questions from correct answers (we need to calculate this from the record)
-                        const questionStats = record.questionStats || {};
-                        Object.keys(questionStats).forEach(q => {
-                          const questionNum = parseInt(q);
-                          if (!isNaN(questionNum)) {
-                            attemptedQuestions.add(questionNum);
-                          }
-                        });
-                        
-                        const unassignedQuestions = [];
-                        for (let i = 1; i <= totalQuestions; i++) {
-                          if (!attemptedQuestions.has(i)) {
-                            unassignedQuestions.push(i);
-                          }
-                        }
-                        
-                        return unassignedQuestions.length > 0 ? (
-                          <details className="mt-2 text-xs text-slate-600">
-                            <summary className="cursor-pointer font-semibold text-slate-500">
-                              Unassigned ({unassignedQuestions.length})
-                            </summary>
-                            <div className="mt-1 text-slate-500">
-                              Questions: {unassignedQuestions.join(', ')}
-                            </div>
-                          </details>
-                        ) : null;
-                      })()}
-                      <div className="mt-2 flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          id={`reviewed-${record.id ?? record.date}`}
-                          checked={record.reviewedMisses || false}
-                          onChange={(e) => {
-                            onUpdate((student) => ({
-                              worksheets: (student.worksheets || []).map(w => 
-                                w.worksheetId === record.worksheetId 
-                                  ? { ...w, reviewedMisses: e.target.checked }
-                                  : w
-                              )
-                            }));
-                          }}
-                          className="size-3 rounded border-slate-300 text-blue-600 focus:ring-blue-200"
-                        />
-                        <label htmlFor={`reviewed-${record.id ?? record.date}`} className="text-xs text-slate-600">
-                          Reviewed misses in class?
-                        </label>
-                      </div>
-                    </li>
-                    );
-                  })}
-                </ul>
+                <p className="mt-1 text-xs text-slate-400">No work logged yet.</p>
               )}
             </div>
           );
         })}
       </div>
-
 
       <TopicChecklist student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
     </section>
@@ -788,11 +812,7 @@ function ReferenceColumn({ onDeleteStudent }) {
       <div className="mt-6 pt-4 border-t border-red-200">
         <button
           type="button"
-          onClick={() => {
-            if (window.confirm(`Are you sure you want to permanently delete all records for ${student.name}? This action cannot be undone.`)) {
-              onDeleteStudent();
-            }
-          }}
+          onClick={onDeleteStudent}
           className="w-full inline-flex items-center justify-center gap-2 rounded-full border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 transition hover:border-red-400 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
         >
           <X className="size-4" aria-hidden />
@@ -842,11 +862,11 @@ export function StudentAnalytics({
       </header>
 
       <main className="mx-auto mt-6 max-w-6xl px-4">
-        <div className="grid gap-8 lg:grid-cols-[1.2fr_1fr_0.8fr]">
-          <div className="space-y-4">
+        <div className="grid gap-8 lg:grid-cols-4">
+          <div className="space-y-4 lg:col-span-2">
             <WorksheetsColumn student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
           </div>
-          <div className="space-y-4">
+          <div className="space-y-4 lg:col-span-1">
             <PracticeTestsColumn
               student={student}
               onAddCustomPractice={onAddCustomPractice}
@@ -855,7 +875,7 @@ export function StudentAnalytics({
               onDeleteCustomPractice={onDeleteCustomPractice}
             />
           </div>
-          <div className="space-y-4">
+          <div className="space-y-4 lg:col-span-1">
             <OfficialTestsColumn
               student={student}
               onUpdate={onUpdate}
