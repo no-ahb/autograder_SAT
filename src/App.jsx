@@ -239,6 +239,7 @@ function buildResultFromWorksheetRecord(record, keyMeta) {
   attemptedArray = Array.from(new Set(attemptedArray)).sort((a, b) => a - b);
 
   const totalAttempted = record.totalAttempted ?? attemptedArray.length;
+  const attemptedSet = new Set(attemptedArray);
   const correct =
     record.correct ??
     (statsHasCorrect
@@ -287,8 +288,99 @@ function buildResultFromWorksheetRecord(record, keyMeta) {
     attemptedQuestions: attemptedArray
   };
 
+  const statsMap = new Map();
+  statsEntries.forEach(([questionKey, value]) => {
+    const questionNumber = Number.parseInt(questionKey, 10);
+    if (!Number.isNaN(questionNumber)) {
+      statsMap.set(questionNumber, value);
+    }
+  });
+
+  const incorrectMap = new Map(
+    incorrect.map((item) => [item.question, item])
+  );
+  const manualMap = new Map(
+    manualReview.map((item) => [item.question, item])
+  );
+  const missingSet = new Set(missing);
+  const highestQuestion = Math.max(
+    totalQuestions,
+    ...Array.from(statsMap.keys()),
+    ...incorrect.map((item) => item.question),
+    ...manualReview.map((item) => item.question)
+  );
+  const scoreboardTotal = Number.isFinite(highestQuestion) && highestQuestion > 0 ? highestQuestion : totalQuestions;
+  const questionStates = [];
+
+  for (let index = 1; index <= scoreboardTotal; index += 1) {
+    const stat = statsMap.get(index);
+    const keyAnswer = keyMeta.key?.get(index) ?? '';
+    if (stat?.status === 'correct') {
+      questionStates.push({
+        question: index,
+        status: 'correct',
+        studentAnswer: (stat.studentAnswer ?? keyAnswer ?? '').toString().toUpperCase(),
+        correctAnswer: keyAnswer
+      });
+      continue;
+    }
+    if (stat?.status === 'incorrect' || incorrectMap.has(index)) {
+      const incorrectEntry = incorrectMap.get(index) ?? {
+        studentAnswer: stat?.studentAnswer ?? '',
+        correctAnswer: stat?.correctAnswer ?? keyAnswer
+      };
+      questionStates.push({
+        question: index,
+        status: 'incorrect',
+        studentAnswer: (incorrectEntry.studentAnswer ?? '').toString().toUpperCase(),
+        correctAnswer: (incorrectEntry.correctAnswer ?? keyAnswer ?? '').toString().toUpperCase()
+      });
+      continue;
+    }
+    if (stat?.status === 'manual' || manualMap.has(index)) {
+      const manualEntry = manualMap.get(index) ?? {
+        answers: Array.isArray(stat?.manualAnswers) ? stat.manualAnswers : [],
+        reasons: Array.isArray(stat?.manualReasons) ? stat.manualReasons : []
+      };
+      questionStates.push({
+        question: index,
+        status: 'manual',
+        studentAnswer: manualEntry.answers?.[0] ?? (stat?.studentAnswer ?? ''),
+        correctAnswer: keyAnswer,
+        manualAnswers: manualEntry.answers ?? [],
+        manualReasons: manualEntry.reasons ?? []
+      });
+      continue;
+    }
+    if (missingSet.has(index)) {
+      questionStates.push({
+        question: index,
+        status: 'unanswered',
+        studentAnswer: '',
+        correctAnswer: keyAnswer
+      });
+      continue;
+    }
+    if (attemptedSet.has(index)) {
+      questionStates.push({
+        question: index,
+        status: 'attempted',
+        studentAnswer: '',
+        correctAnswer: keyAnswer
+      });
+      continue;
+    }
+    questionStates.push({
+      question: index,
+      status: 'unseen',
+      studentAnswer: '',
+      correctAnswer: keyAnswer
+    });
+  }
+
   return {
     ...result,
+    questionStates,
     report: formatReport(result)
   };
 }
@@ -340,6 +432,7 @@ function ResultCard({ result }) {
   }
 
   const percentDisplay = FRACTION_FORMATTER.format(result.percent);
+  const hasQuestionStates = Array.isArray(result.questionStates) && result.questionStates.length > 0;
 
   return (
     <motion.section
@@ -363,6 +456,76 @@ function ResultCard({ result }) {
           </p>
         </div>
       </div>
+
+      {hasQuestionStates ? (
+        <div className="mt-6">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-700">Worksheet scorecard</p>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400">Live per question</p>
+          </div>
+          <div className="mt-3 grid gap-2 grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+            {result.questionStates.map((item) => {
+              const status = item.status;
+              const questionLabel = item.question;
+              let containerClasses =
+                'rounded-lg border border-slate-200 bg-white px-2 py-2 text-center transition';
+              let answerNode = null;
+
+              if (status === 'correct') {
+                containerClasses = 'rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-center transition';
+                answerNode = (
+                  <span
+                    className="text-sm font-semibold text-emerald-600"
+                    title="Correct on latest record"
+                  >
+                    {(item.studentAnswer || item.correctAnswer || '').toString().toUpperCase()}
+                  </span>
+                );
+              } else if (status === 'incorrect') {
+                containerClasses = 'rounded-lg border border-rose-200 bg-rose-50 px-2 py-2 text-center transition';
+                answerNode = (
+                  <span
+                    className="text-sm font-semibold text-rose-500"
+                    title={`Correct answer: ${(item.correctAnswer || '—').toString().toUpperCase()}`}
+                  >
+                    {(item.studentAnswer || '—').toString().toUpperCase()}{' '}
+                    <span className="text-xs font-medium text-slate-700">
+                      [{(item.correctAnswer || '—').toString().toUpperCase()}]
+                    </span>
+                  </span>
+                );
+              } else if (status === 'manual') {
+                containerClasses = 'rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-center transition';
+                const manualSummary = Array.isArray(item.manualAnswers)
+                  ? item.manualAnswers.join(', ')
+                  : item.studentAnswer;
+                const reasonsSummary = Array.isArray(item.manualReasons)
+                  ? item.manualReasons.join('; ')
+                  : '';
+                answerNode = (
+                  <span
+                    className="text-sm font-semibold text-amber-600"
+                    title={reasonsSummary || 'Manual review pending'}
+                  >
+                    {(manualSummary || '?').toString().toUpperCase()}
+                  </span>
+                );
+              } else {
+                answerNode = null;
+              }
+
+              return (
+                <div key={questionLabel} className={containerClasses}>
+                  <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    {questionLabel}
+                  </span>
+                  {answerNode ? <div className="mt-1 leading-none">{answerNode}</div> : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -694,11 +857,12 @@ export default function App() {
 
   const persistWorksheetResult = (gradeResult, parsedAnswers) => {
     if (!selectedKey || !selectedStudent) {
-      return;
+      return null;
     }
     
     prepareUndoSnapshot();
     
+    let savedEntry = null;
     updateCurrentStudent((student) => {
       const worksheets = Array.isArray(student.worksheets) ? [...student.worksheets] : [];
       const existingIndex = worksheets.findIndex(
@@ -715,18 +879,21 @@ export default function App() {
         (gradeResult.manualReview ?? []).map((item) => [item.question, item])
       );
 
-      const attemptedQuestions = new Set(gradeResult.attemptedQuestions ?? []);
-      manualReviewMap.forEach((_, question) => attemptedQuestions.add(question));
+      const previousHistory = Array.isArray(existingEntry?.history) ? existingEntry.history : [];
+      const attemptedThisRun = new Set(gradeResult.attemptedQuestions ?? []);
+      manualReviewMap.forEach((_, question) => attemptedThisRun.add(question));
 
-      const questionStats = {};
-      for (const question of attemptedQuestions) {
-        const previous = existingEntry?.questionStats?.[question] ?? null;
+      const mergedQuestionStats = { ...(existingEntry?.questionStats ?? {}) };
+      const attemptsTracker = existingEntry?.questionStats ?? {};
+
+      for (const question of attemptedThisRun) {
+        const previous = attemptsTracker?.[question] ?? mergedQuestionStats?.[question] ?? null;
         const attempts = (previous?.attempts ?? 0) + 1;
         const correctAnswer = selectedKey.key.get(question) || '';
 
         if (manualReviewMap.has(question)) {
           const manual = manualReviewMap.get(question);
-          questionStats[question] = {
+          mergedQuestionStats[question] = {
             status: 'manual',
             studentAnswer: manual.answers?.[0] ?? '',
             correctAnswer,
@@ -740,7 +907,7 @@ export default function App() {
 
         if (incorrectMap.has(question)) {
           const incorrect = incorrectMap.get(question);
-          questionStats[question] = {
+          mergedQuestionStats[question] = {
             status: 'incorrect',
             studentAnswer: incorrect.studentAnswer,
             correctAnswer: incorrect.correctAnswer ?? correctAnswer,
@@ -751,7 +918,7 @@ export default function App() {
         }
 
         const studentAnswer = answersMap.get(question) ?? previous?.studentAnswer ?? '';
-        questionStats[question] = {
+        mergedQuestionStats[question] = {
           status: 'correct',
           studentAnswer,
           correctAnswer,
@@ -760,8 +927,94 @@ export default function App() {
         };
       }
 
-      const attemptedList = Array.from(attemptedQuestions).sort((a, b) => a - b);
+      const attemptedAggregate = new Set(existingEntry?.attemptedQuestions ?? []);
+      attemptedThisRun.forEach((question) => attemptedAggregate.add(question));
+      const attemptedList = Array.from(attemptedAggregate).sort((a, b) => a - b);
       const totalQuestions = selectedKey.total;
+      const aggregatedIncorrect = [];
+      const aggregatedManual = [];
+      let aggregatedCorrect = 0;
+
+      Object.entries(mergedQuestionStats).forEach(([questionKey, value]) => {
+        const questionNumber = Number.parseInt(questionKey, 10);
+        if (Number.isNaN(questionNumber)) {
+          return;
+        }
+        if (value?.status === 'correct') {
+          aggregatedCorrect += 1;
+        } else if (value?.status === 'incorrect') {
+          aggregatedIncorrect.push({
+            question: questionNumber,
+            studentAnswer: value.studentAnswer ?? '',
+            correctAnswer: value.correctAnswer ?? selectedKey.key.get(questionNumber) ?? ''
+          });
+        } else if (value?.status === 'manual') {
+          const manualAnswers = Array.isArray(value.manualAnswers)
+            ? value.manualAnswers
+            : value.manualAnswers
+              ? [value.manualAnswers]
+              : value.studentAnswer
+                ? [value.studentAnswer]
+                : [];
+          const manualReasons = Array.isArray(value.manualReasons)
+            ? value.manualReasons
+            : value.manualReasons
+              ? [value.manualReasons]
+              : [];
+          aggregatedManual.push({
+            question: questionNumber,
+            answers: manualAnswers,
+            reasons: manualReasons
+          });
+        }
+      });
+      aggregatedIncorrect.sort((a, b) => a.question - b.question);
+      aggregatedManual.sort((a, b) => a.question - b.question);
+
+      const aggregatedMissing = [];
+      if (totalQuestions > 0) {
+        for (let index = 1; index <= totalQuestions; index += 1) {
+          if (!mergedQuestionStats[index]) {
+            aggregatedMissing.push(index);
+          }
+        }
+      }
+      const aggregatedMissingCount = aggregatedMissing.length;
+      const aggregatedAttemptedCount =
+        totalQuestions > 0
+          ? Math.max(0, totalQuestions - aggregatedMissingCount)
+          : attemptedList.length;
+      const aggregatedDenominator = skipMissing
+        ? Math.max(totalQuestions - aggregatedMissingCount, 0)
+        : totalQuestions;
+      const aggregatedPercent =
+        aggregatedDenominator > 0 ? (aggregatedCorrect / aggregatedDenominator) * 100 : 0;
+      const historyEntry = {
+        id: `history-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        recordedAt: nowIso,
+        attempted: attemptedThisRun.size,
+        correct: gradeResult.correct,
+        total: gradeResult.total,
+        percent: gradeResult.percent,
+        incorrect: (gradeResult.incorrect ?? []).map((item) => ({ ...item })),
+        incorrectCount: gradeResult.incorrectCount,
+        manualReview: (gradeResult.manualReview ?? []).map((item) => ({
+          ...item,
+          answers: Array.isArray(item.answers) ? [...item.answers] : []
+        })),
+        manualReviewCount: gradeResult.manualReviewCount,
+        missing: (gradeResult.missing ?? []).slice().sort((a, b) => a - b),
+        missingCount: gradeResult.missingCount,
+        skipMissingUsed: skipMissing,
+        reviewed: false
+      };
+      const history = [
+        historyEntry,
+        ...previousHistory.map((item) => ({
+          ...item,
+          reviewed: Boolean(item?.reviewed)
+        }))
+      ];
       const entry = {
         ...(existingEntry ?? {}),
         id: existingEntry?.id ?? `worksheet-${Date.now()}`,
@@ -769,22 +1022,23 @@ export default function App() {
         worksheetLabel: selectedKey.label,
         date: nowIso,
         lastUpdated: nowIso,
-        questionStats,
+        questionStats: mergedQuestionStats,
         attemptedQuestions: attemptedList,
         totalQuestions,
-        total: gradeResult.total,
-        correct: gradeResult.correct,
-        incorrect: gradeResult.incorrect,
-        incorrectCount: gradeResult.incorrectCount,
-        manualReview: gradeResult.manualReview,
-        manualReviewCount: gradeResult.manualReviewCount,
-        missing: (gradeResult.missing ?? []).slice().sort((a, b) => a - b),
-        missingCount: gradeResult.missingCount,
-        totalAttempted: attemptedList.length,
-        percent: gradeResult.percent,
-        denominator: gradeResult.denominator,
+        total: totalQuestions,
+        correct: aggregatedCorrect,
+        incorrect: aggregatedIncorrect,
+        incorrectCount: aggregatedIncorrect.length,
+        manualReview: aggregatedManual,
+        manualReviewCount: aggregatedManual.length,
+        missing: aggregatedMissing,
+        missingCount: aggregatedMissingCount,
+        totalAttempted: aggregatedAttemptedCount,
+        percent: aggregatedPercent,
+        denominator: aggregatedDenominator,
         skipMissingUsed: skipMissing,
-        reviewedMisses: existingEntry?.reviewedMisses ?? false
+        reviewedMisses: existingEntry?.reviewedMisses ?? false,
+        history
       };
 
       if (existingIndex >= 0) {
@@ -792,6 +1046,8 @@ export default function App() {
       } else {
         worksheets.unshift(entry);
       }
+
+      savedEntry = entry;
       
       return {
         worksheets,
@@ -801,6 +1057,8 @@ export default function App() {
         }
       };
     });
+
+    return savedEntry;
   };
 
   const handleFile = async (file) => {
@@ -863,21 +1121,27 @@ export default function App() {
         skipMissing
       });
 
-      persistWorksheetResult(gradeResult, parsedAnswers);
+      const savedEntry = persistWorksheetResult(gradeResult, parsedAnswers);
+      const derivedResult = savedEntry
+        ? buildResultFromWorksheetRecord(savedEntry, selectedKey)
+        : null;
 
-      const report = formatReport({
-        ...gradeResult,
-        keyName: selectedKey.label,
-        skipMissing
-      });
-
-      setResult({
-        ...gradeResult,
-        keyId: selectedKey.id,
-        keyName: selectedKey.label,
-        skipMissing,
-        report
-      });
+      if (derivedResult) {
+        setResult(derivedResult);
+      } else {
+        const fallbackReport = formatReport({
+          ...gradeResult,
+          keyName: selectedKey.label,
+          skipMissing
+        });
+        setResult({
+          ...gradeResult,
+          keyId: selectedKey.id,
+          keyName: selectedKey.label,
+          skipMissing,
+          report: fallbackReport
+        });
+      }
       setShowConfetti(true);
       if (confettiTimerRef.current) {
         window.clearTimeout(confettiTimerRef.current);

@@ -1,0 +1,18 @@
+# TODO
+- [ ] Backfill existing worksheet records with an initial history entry so legacy data surfaces in the new log view.
+- [ ] Audit the scorecard grid on smaller devices and adjust column counts if readability is an issue.
+
+# QUESTIONS
+- Should the manual review status show additional messaging in the scorecard legend (e.g., tooltip text or a dedicated color key)?
+
+# NOTES
+- Worksheet uploads now append to `history`; toggling Reviewed in class? updates each entry independently and keeps the legacy `reviewedMisses` flag synced for the newest log.
+- The scorecard grid reads from persisted question stats, so prior uploads appear immediately after grading.
+
+# COMPLETED
+- [x] Update README with feature highlights and licensing guidance.
+- [x] Redesign the worksheet scorecard to show every question with status-aware coloring.
+- [x] Widen the analytics view, refresh practice test inputs, and reposition the Reference module beneath Practice + SAT timeline.
+- [x] Add worksheet upload history with per-attempt miss/manual-review summaries and review checkboxes.
+- [x] Include assignment percentages in the worksheet header and move the delete `X` to the top-right.
+- [x] Expand answer parsing regex to cover dash variants, inline commas, and trailing punctuation.

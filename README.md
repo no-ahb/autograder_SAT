@@ -9,6 +9,8 @@ A fast, client-only SAT autograder for English/Math worksheets. Upload a PDF/TXT
 * Option to **skip missing** from denominator.
 * Copy-ready output: title, `X / Y correct`, wrong list, manual review, notes.
 * PDF parsing with **no external worker/CDN**.
+* Live scorecard: every worksheet shows a color-coded question grid that updates as students upload new attempts.
+* Student analytics dashboard with per-attempt history logs, aggregated progress, and reminders for what is still outstanding.
 
 ## Quick start
 
@@ -58,4 +60,12 @@ Covers parsing variants, duplicates, missing policy, and grading math/english se
 
 ## License
 
-MIT (adjust as needed).
+The project currently ships under the MIT License (see `LICENSE`), which keeps the code permissive and easy to reuse in tutoring businesses.
+
+If you need to change the licensing, pick the path that matches how you plan to share the tool:
+
+1. **Keep MIT (default)** – do nothing; update attribution in forks as usual.
+2. **Switch to another permissive license (e.g., Apache 2.0)** – replace the text in `LICENSE`, add any required NOTICE file, and update the `license` field in `package.json` and this section.
+3. **Offer it under a proprietary/commercial license** – swap `LICENSE` with your terms, remove MIT headers from source files if required, and document how clients may use the app.
+
+Whichever option you pick, make sure both the `LICENSE` file and this README clearly state the choice so downstream tutors know the rules.

@@ -96,7 +96,24 @@ export function ensureStudentShape(student) {
     createdAt: student.createdAt ?? now,
     updatedAt: student.updatedAt ?? now,
     upcomingSatDate: student.upcomingSatDate ?? '',
-    worksheets: Array.isArray(student.worksheets) ? student.worksheets : [],
+    worksheets: Array.isArray(student.worksheets)
+      ? student.worksheets.map((worksheet) => ({
+          ...worksheet,
+          questionStats:
+            worksheet.questionStats && typeof worksheet.questionStats === 'object'
+              ? worksheet.questionStats
+              : {},
+          history: Array.isArray(worksheet.history)
+            ? worksheet.history.map((entry) => ({
+                ...entry,
+                incorrect: Array.isArray(entry.incorrect) ? entry.incorrect : [],
+                manualReview: Array.isArray(entry.manualReview) ? entry.manualReview : [],
+                missing: Array.isArray(entry.missing) ? entry.missing : [],
+                reviewed: Boolean(entry.reviewed)
+              }))
+            : []
+        }))
+      : [],
     practiceTests: [...practiceTests.filter((item) => bluebookIds.has(item.id)), ...missingDefault],
     customPracticeTests: Array.isArray(student.customPracticeTests)
       ? student.customPracticeTests

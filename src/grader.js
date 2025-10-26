@@ -9,8 +9,8 @@ function scanAnswerPairs(text) {
   }
 
   // First, find all question numbers and their answers
-  // Pattern: number followed by colon/period/paren/hyphen and answer
-  const markers = Array.from(source.matchAll(/(\d{1,3})\s*(?:[:.]|\)|-)/g));
+  // Pattern: number followed by colon/period/paren/dash variants and answer
+  const markers = Array.from(source.matchAll(/(\d{1,3})\s*(?:[:.)\-–—])/g));
 
   markers.forEach((marker, index) => {
     const numberRaw = marker[1];
@@ -27,12 +27,20 @@ function scanAnswerPairs(text) {
       return;
     }
 
-    const answer = answerRaw.replace(/^[).:\-\s]+/, '').trim();
-    
+    const answer = answerRaw.replace(/^[\s).:,\-–—]+/, '').trim();
+    const letterMatch = answer.match(/^([A-Ea-e])([\s).,;:\-–—]*)$/);
+    const normalizedAnswer = letterMatch ? letterMatch[1].toUpperCase() : answer.toUpperCase();
+
     // If answer is blank, empty, or contains non-answer characters, mark for manual review
-    if (!answer || answer === '' || answer === '?' || answer === 'x' || answer === 'X' || 
-        answer.toLowerCase() === 'blank' || answer.toLowerCase() === 'skip' ||
-        !/^[A-E]$/i.test(answer)) {
+    if (
+      !answer ||
+      normalizedAnswer === '' ||
+      normalizedAnswer === '?' ||
+      normalizedAnswer === 'X' ||
+      answer.toLowerCase() === 'blank' ||
+      answer.toLowerCase() === 'skip' ||
+      !letterMatch
+    ) {
       pairs.push({
         question: number,
         answer: answer || 'blank',
@@ -42,7 +50,7 @@ function scanAnswerPairs(text) {
     } else {
       pairs.push({
         question: number,
-        answer: answer.toUpperCase(),
+        answer: normalizedAnswer,
         raw: fullMatch.trim(),
         needsManualReview: false
       });
