@@ -174,6 +174,125 @@ function formatReport(result) {
   return lines.join('\n').trim();
 }
 
+function buildResultFromWorksheetRecord(record, keyMeta) {
+  if (!record || !keyMeta) {
+    return null;
+  }
+
+  const totalQuestions = record.total ?? record.totalQuestions ?? keyMeta.total ?? 0;
+  const questionStats = record.questionStats ?? {};
+  const statsEntries = Object.entries(questionStats);
+  const fallbackIncorrect = [];
+  const fallbackManual = [];
+  const statsAttempted = [];
+  let statsHasCorrect = false;
+
+  for (const [questionKey, value] of statsEntries) {
+    const question = Number.parseInt(questionKey, 10);
+    if (Number.isNaN(question)) {
+      continue;
+    }
+    statsAttempted.push(question);
+    if (value?.status === 'correct') {
+      statsHasCorrect = true;
+    } else if (value?.status === 'incorrect') {
+      fallbackIncorrect.push({
+        question,
+        correctAnswer: value.correctAnswer ?? keyMeta.key.get(question) ?? '',
+        studentAnswer: value.studentAnswer ?? ''
+      });
+    } else if (value?.status === 'manual') {
+      fallbackManual.push({
+        question,
+        answers: Array.isArray(value.manualAnswers) ? value.manualAnswers : [],
+        reasons: Array.isArray(value.manualReasons) ? value.manualReasons : []
+      });
+    }
+  }
+
+  const incorrect = Array.isArray(record.incorrect) && record.incorrect.length > 0
+    ? record.incorrect
+    : fallbackIncorrect;
+  const manualReview = Array.isArray(record.manualReview) && record.manualReview.length > 0
+    ? record.manualReview
+    : fallbackManual.map((item) => ({
+        question: item.question,
+        answers: item.answers,
+        reasons: item.reasons
+      }));
+
+  const incorrectCount = record.incorrectCount ?? incorrect.length;
+  const manualReviewCount = record.manualReviewCount ?? manualReview.length;
+  const skipMissing = typeof record.skipMissingUsed === 'boolean' ? record.skipMissingUsed : true;
+
+  let attemptedArray = [];
+  let attemptedReliable = false;
+  if (Array.isArray(record.attemptedQuestions) && record.attemptedQuestions.length > 0) {
+    attemptedArray = record.attemptedQuestions
+      .map((value) => Number.parseInt(value, 10))
+      .filter((value) => !Number.isNaN(value));
+    attemptedReliable = attemptedArray.length > 0;
+  } else if (statsEntries.length > 0) {
+    attemptedArray = statsAttempted.slice();
+    attemptedReliable = statsHasCorrect || (record.correct ?? 0) === 0;
+  }
+  attemptedArray = Array.from(new Set(attemptedArray)).sort((a, b) => a - b);
+
+  const totalAttempted = record.totalAttempted ?? attemptedArray.length;
+  const correct =
+    record.correct ??
+    (statsHasCorrect
+      ? statsEntries.filter(([, value]) => value?.status === 'correct').length
+      : 0);
+
+  let missing = Array.isArray(record.missing) ? record.missing.slice() : [];
+  if (missing.length === 0 && attemptedReliable && totalQuestions > 0) {
+    const attemptedSet = new Set(attemptedArray);
+    missing = [];
+    for (let index = 1; index <= totalQuestions; index += 1) {
+      if (!attemptedSet.has(index)) {
+        missing.push(index);
+      }
+    }
+  }
+  missing.sort((a, b) => a - b);
+  const missingCount = record.missingCount ?? missing.length;
+
+  const denominator =
+    record.denominator ??
+    (skipMissing ? Math.max(totalQuestions - missingCount, 0) : totalQuestions);
+
+  const percent =
+    typeof record.percent === 'number'
+      ? record.percent
+      : denominator > 0
+        ? (correct / denominator) * 100
+        : 0;
+
+  const result = {
+    total: totalQuestions,
+    correct,
+    incorrect,
+    incorrectCount,
+    manualReview,
+    manualReviewCount,
+    missing,
+    missingCount,
+    denominator,
+    percent,
+    keyId: record.worksheetId ?? keyMeta.id,
+    keyName: record.worksheetLabel ?? keyMeta.label,
+    skipMissing,
+    totalAttempted,
+    attemptedQuestions: attemptedArray
+  };
+
+  return {
+    ...result,
+    report: formatReport(result)
+  };
+}
+
 function Confetti({ show }) {
   const pieces = useMemo(
     () =>
@@ -245,7 +364,7 @@ function ResultCard({ result }) {
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
           <p className="text-sm font-medium text-slate-500">Incorrect</p>
           <p className="mt-1 text-xl font-semibold text-slate-900">{result.incorrectCount}</p>
@@ -279,16 +398,6 @@ function ResultCard({ result }) {
             </ul>
           ) : (
             <p className="mt-2 text-sm text-slate-400">Nothing pending here.</p>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-          <p className="text-sm font-medium text-slate-500">Missing</p>
-          <p className="mt-1 text-xl font-semibold text-slate-900">{result.missingCount}</p>
-          {result.missingCount > 0 ? (
-            <p className="mt-2 text-sm text-slate-600">{result.missing.join(', ')}</p>
-          ) : (
-            <p className="mt-2 text-sm text-slate-400">All covered.</p>
           )}
         </div>
       </div>
@@ -360,6 +469,15 @@ export default function App() {
     [students, selectedStudentId]
   );
 
+  const currentWorksheetRecord = useMemo(() => {
+    if (!selectedStudent || !selectedKey) {
+      return null;
+    }
+    return (selectedStudent.worksheets ?? []).find(
+      (worksheet) => worksheet.worksheetId === selectedKey.id
+    ) ?? null;
+  }, [selectedStudent, selectedKey]);
+
   const filteredStudents = useMemo(() => {
     const term = studentSearchTerm.trim().toLowerCase();
     if (!term) {
@@ -377,6 +495,29 @@ export default function App() {
       setStudentSearchTerm('');
     }
   }, [selectedStudent?.name]);
+
+  useEffect(() => {
+    if (!selectedKey) {
+      return;
+    }
+    if (!selectedStudent) {
+      setResult(null);
+      return;
+    }
+    if (!currentWorksheetRecord) {
+      setResult(null);
+      return;
+    }
+    const hydrated = buildResultFromWorksheetRecord(currentWorksheetRecord, selectedKey);
+    if (!hydrated) {
+      setResult(null);
+      return;
+    }
+    setResult(hydrated);
+    if (typeof currentWorksheetRecord.skipMissingUsed === 'boolean') {
+      setSkipMissing(currentWorksheetRecord.skipMissingUsed);
+    }
+  }, [currentWorksheetRecord, selectedKey, selectedStudent]);
 
   const handleStudentSelect = (student) => {
     setAutoSelectStudent(true);
@@ -563,99 +704,88 @@ export default function App() {
       const existingIndex = worksheets.findIndex(
         (item) => item.worksheetId === selectedKey.id
       );
+      const existingEntry = existingIndex >= 0 ? worksheets[existingIndex] : null;
+      const nowIso = new Date().toISOString();
+      const answersMap =
+        parsedAnswers?.answers instanceof Map ? parsedAnswers.answers : new Map();
+      const incorrectMap = new Map(
+        (gradeResult.incorrect ?? []).map((item) => [item.question, item])
+      );
+      const manualReviewMap = new Map(
+        (gradeResult.manualReview ?? []).map((item) => [item.question, item])
+      );
 
-      // Create new question stats from current grading
-      const newQuestionStats = {};
-      const attemptedQuestions = new Set();
-      
-      // Add correct answers
-      gradeResult.attemptedQuestions?.forEach(q => {
-        attemptedQuestions.add(q);
-        newQuestionStats[q] = {
+      const attemptedQuestions = new Set(gradeResult.attemptedQuestions ?? []);
+      manualReviewMap.forEach((_, question) => attemptedQuestions.add(question));
+
+      const questionStats = {};
+      for (const question of attemptedQuestions) {
+        const previous = existingEntry?.questionStats?.[question] ?? null;
+        const attempts = (previous?.attempts ?? 0) + 1;
+        const correctAnswer = selectedKey.key.get(question) || '';
+
+        if (manualReviewMap.has(question)) {
+          const manual = manualReviewMap.get(question);
+          questionStats[question] = {
+            status: 'manual',
+            studentAnswer: manual.answers?.[0] ?? '',
+            correctAnswer,
+            manualAnswers: manual.answers ?? [],
+            manualReasons: manual.reasons ?? [],
+            attempts,
+            lastUpdated: nowIso
+          };
+          continue;
+        }
+
+        if (incorrectMap.has(question)) {
+          const incorrect = incorrectMap.get(question);
+          questionStats[question] = {
+            status: 'incorrect',
+            studentAnswer: incorrect.studentAnswer,
+            correctAnswer: incorrect.correctAnswer ?? correctAnswer,
+            attempts,
+            lastUpdated: nowIso
+          };
+          continue;
+        }
+
+        const studentAnswer = answersMap.get(question) ?? previous?.studentAnswer ?? '';
+        questionStats[question] = {
           status: 'correct',
-          studentAnswer: parsedAnswers.answers?.get(q) || '',
-          correctAnswer: selectedKey.key.get(q) || '',
-          attempts: 1,
-          lastUpdated: new Date().toISOString()
-        };
-      });
-      
-      // Add incorrect answers
-      gradeResult.incorrect?.forEach(item => {
-        attemptedQuestions.add(item.question);
-        newQuestionStats[item.question] = {
-          status: 'incorrect',
-          studentAnswer: item.studentAnswer,
-          correctAnswer: item.correctAnswer,
-          attempts: 1,
-          lastUpdated: new Date().toISOString()
-        };
-      });
-      
-      // Add manual review
-      gradeResult.manualReview?.forEach(item => {
-        attemptedQuestions.add(item.question);
-        newQuestionStats[item.question] = {
-          status: 'manual',
-          studentAnswer: item.answers?.[0] || '',
-          correctAnswer: selectedKey.key.get(item.question) || '',
-          manualAnswers: item.answers || [],
-          manualReasons: item.reasons || [],
-          attempts: 1,
-          lastUpdated: new Date().toISOString()
-        };
-      });
-
-      let entry;
-      if (existingIndex >= 0) {
-        // Merge with existing data - take most recent attempt for each question
-        const existing = worksheets[existingIndex];
-        const mergedQuestionStats = { ...existing.questionStats };
-        
-        // Update with new data, keeping most recent attempts
-        Object.entries(newQuestionStats).forEach(([q, newStats]) => {
-          const existingStats = mergedQuestionStats[q];
-          if (!existingStats || new Date(newStats.lastUpdated) > new Date(existingStats.lastUpdated)) {
-            mergedQuestionStats[q] = newStats;
-          }
-        });
-        
-        // Calculate cumulative statistics
-        const allQuestions = Object.keys(mergedQuestionStats);
-        const correctCount = allQuestions.filter(q => mergedQuestionStats[q].status === 'correct').length;
-        const incorrectCount = allQuestions.filter(q => mergedQuestionStats[q].status === 'incorrect').length;
-        const manualCount = allQuestions.filter(q => mergedQuestionStats[q].status === 'manual').length;
-        const totalAttempted = allQuestions.length;
-        const percent = totalAttempted > 0 ? (correctCount / totalAttempted) * 100 : 0;
-        
-        entry = {
-          ...existing,
-          questionStats: mergedQuestionStats,
-          correct: correctCount,
-          incorrectCount,
-          manualReviewCount: manualCount,
-          totalAttempted,
-          percent,
-          lastUpdated: new Date().toISOString()
-        };
-      } else {
-        // New worksheet entry
-        entry = {
-          id: `worksheet-${Date.now()}`,
-          worksheetId: selectedKey.id,
-          worksheetLabel: selectedKey.label,
-          totalQuestions: selectedKey.total,
-          questionStats: newQuestionStats,
-          correct: gradeResult.correct,
-          incorrectCount: gradeResult.incorrectCount,
-          manualReviewCount: gradeResult.manualReviewCount,
-          totalAttempted: attemptedQuestions.size,
-          percent: gradeResult.percent,
-          skipMissingUsed: skipMissing,
-          reviewedMisses: false,
-          lastUpdated: new Date().toISOString()
+          studentAnswer,
+          correctAnswer,
+          attempts,
+          lastUpdated: nowIso
         };
       }
+
+      const attemptedList = Array.from(attemptedQuestions).sort((a, b) => a - b);
+      const totalQuestions = selectedKey.total;
+      const entry = {
+        ...(existingEntry ?? {}),
+        id: existingEntry?.id ?? `worksheet-${Date.now()}`,
+        worksheetId: selectedKey.id,
+        worksheetLabel: selectedKey.label,
+        date: nowIso,
+        lastUpdated: nowIso,
+        questionStats,
+        attemptedQuestions: attemptedList,
+        totalQuestions,
+        total: gradeResult.total,
+        correct: gradeResult.correct,
+        incorrect: gradeResult.incorrect,
+        incorrectCount: gradeResult.incorrectCount,
+        manualReview: gradeResult.manualReview,
+        manualReviewCount: gradeResult.manualReviewCount,
+        missing: (gradeResult.missing ?? []).slice().sort((a, b) => a - b),
+        missingCount: gradeResult.missingCount,
+        totalAttempted: attemptedList.length,
+        percent: gradeResult.percent,
+        denominator: gradeResult.denominator,
+        skipMissingUsed: skipMissing,
+        reviewedMisses: existingEntry?.reviewedMisses ?? false
+      };
 
       if (existingIndex >= 0) {
         worksheets[existingIndex] = entry;

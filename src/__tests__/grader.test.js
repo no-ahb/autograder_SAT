@@ -20,6 +20,7 @@ describe('grade', () => {
     expect(result.incorrectCount).toBe(1);
     expect(result.missingCount).toBe(2);
     expect(result.denominator).toBe(5);
+    expect(result.attemptedQuestions).toEqual([1, 2, 4]);
   });
 
   it('drops missing answers from denominator when skipMissing is true', () => {
@@ -40,6 +41,7 @@ describe('grade', () => {
     expect(result.manualReviewCount).toBe(1);
     expect(result.manualReview[0].question).toBe(2);
     expect(result.manualReview[0].reasons).toContain('Duplicate answers provided');
+    expect(result.attemptedQuestions).toEqual([2]);
   });
 
   it('sends non A-E answers to manual review', () => {

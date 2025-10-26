@@ -207,6 +207,13 @@ export function grade({ key, studentAnswers, skipMissing = false }) {
     }))
     .sort((a, b) => a.question - b.question);
 
+  const attemptedQuestions = Array.from(
+    new Set([
+      ...answerMap.keys(),
+      ...manualReview.map((item) => item.question)
+    ])
+  ).sort((a, b) => a - b);
+
   return {
     total,
     correct,
@@ -217,6 +224,7 @@ export function grade({ key, studentAnswers, skipMissing = false }) {
     manualReview,
     manualReviewCount: manualReview.length,
     denominator,
-    percent
+    percent,
+    attemptedQuestions
   };
 }

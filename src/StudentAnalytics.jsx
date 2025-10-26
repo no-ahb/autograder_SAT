@@ -29,6 +29,76 @@ function percentDisplay(value) {
   return `${value.toFixed(1)}%`;
 }
 
+function formatQuestionRanges(numbers) {
+  if (!Array.isArray(numbers) || numbers.length === 0) {
+    return '';
+  }
+
+  const sorted = Array.from(
+    new Set(
+      numbers
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => !Number.isNaN(value))
+    )
+  ).sort((a, b) => a - b);
+
+  const ranges = [];
+  let rangeStart = sorted[0];
+  let previous = sorted[0];
+
+  for (let index = 1; index < sorted.length; index += 1) {
+    const current = sorted[index];
+    if (current === previous + 1) {
+      previous = current;
+      continue;
+    }
+    ranges.push(rangeStart === previous ? `${rangeStart}` : `${rangeStart}-${previous}`);
+    rangeStart = current;
+    previous = current;
+  }
+
+  ranges.push(rangeStart === previous ? `${rangeStart}` : `${rangeStart}-${previous}`);
+  return ranges.join(', ');
+}
+
+function deriveAttemptedInfo(record) {
+  const attemptedSet = new Set();
+  let reliable = false;
+
+  if (Array.isArray(record?.attemptedQuestions) && record.attemptedQuestions.length > 0) {
+    record.attemptedQuestions.forEach((value) => {
+      const number = Number.parseInt(value, 10);
+      if (!Number.isNaN(number)) {
+        attemptedSet.add(number);
+      }
+    });
+    reliable = attemptedSet.size > 0;
+  }
+
+  if (!reliable) {
+    const statsEntries = Object.entries(record?.questionStats ?? {});
+    if (statsEntries.length > 0) {
+      let hasCorrect = false;
+      for (const [questionKey, value] of statsEntries) {
+        const number = Number.parseInt(questionKey, 10);
+        if (Number.isNaN(number)) {
+          continue;
+        }
+        attemptedSet.add(number);
+        if (value?.status === 'correct') {
+          hasCorrect = true;
+        }
+      }
+      reliable = hasCorrect || (record?.correct ?? 0) === 0;
+      if (!reliable) {
+        attemptedSet.clear();
+      }
+    }
+  }
+
+  return { set: attemptedSet, reliable };
+}
+
 function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
   const checklist = student.topicChecklist ?? {};
 
@@ -186,6 +256,26 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     return grouped;
   }, [assignedList]);
 
+  const handleDeleteWorksheet = (record, meta) => {
+    if (!record) {
+      return;
+    }
+    const worksheetLabel = meta?.label ?? 'worksheet';
+    if (!window.confirm(`Remove logged results for ${worksheetLabel}?`)) {
+      return;
+    }
+    const recordId = record.id;
+    const worksheetId = record.worksheetId;
+    onUpdate((draft) => ({
+      worksheets: (draft.worksheets ?? []).filter((item) => {
+        if (recordId) {
+          return item.id !== recordId;
+        }
+        return item.worksheetId !== worksheetId;
+      })
+    }));
+  };
+
   const SubjectPanel = ({ subject, items }) => {
     const isEnglish = subject === 'english';
     const panelClasses = isEnglish
@@ -204,62 +294,164 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
           <p className={`mt-2 text-xs ${emptyClasses}`}>None assigned yet.</p>
         ) : (
           <ul className="mt-2 space-y-2">
-            {items.map(({ meta, record }) => (
-              <li
-                key={record.id ?? record.date}
-                className={`rounded-xl border border-white/70 bg-white p-3 text-xs text-slate-600 shadow-sm transition ${hoverClasses}`}
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
-                    <p className="text-xs text-slate-500">
-                      {(() => {
-                        const totalAttempted = Object.keys(record.questionStats || {}).length;
-                        const correctCount = record.correct || 0;
-                        const totalQuestions = meta.total || meta.key?.size || 0;
-                        const remainingQuestions = Math.max(totalQuestions - totalAttempted, 0);
-                        const percent =
-                          totalAttempted > 0 ? (correctCount / totalAttempted) * 100 : 0;
+            {items.map(({ meta, record }) => {
+              const totalQuestions =
+                record.totalQuestions ?? meta.total ?? meta.key?.size ?? 0;
+              const attemptedInfo = deriveAttemptedInfo(record);
+              const fallbackAttempted =
+                (record.correct ?? 0) +
+                (record.incorrectCount ?? 0) +
+                (record.manualReviewCount ?? 0);
+              const rawAttempted =
+                typeof record.totalAttempted === 'number'
+                  ? record.totalAttempted
+                  : attemptedInfo.reliable
+                    ? attemptedInfo.set.size
+                    : fallbackAttempted;
+              const totalAttempted =
+                totalQuestions > 0
+                  ? Math.max(0, Math.min(rawAttempted, totalQuestions))
+                  : Math.max(0, rawAttempted);
+              const derivedCorrect =
+                typeof record.correct === 'number'
+                  ? record.correct
+                  : attemptedInfo.reliable
+                    ? Array.from(attemptedInfo.set).filter(
+                        (question) =>
+                          record.questionStats?.[question]?.status === 'correct'
+                      ).length
+                    : 0;
+              const correctCount = Math.max(0, Math.min(derivedCorrect, totalAttempted));
+              const remainingQuestions =
+                totalQuestions > 0 ? Math.max(totalQuestions - totalAttempted, 0) : 0;
+              const percent =
+                totalAttempted > 0 ? (correctCount / totalAttempted) * 100 : 0;
 
-                        let colorClass = 'text-slate-500';
-                        if (percent >= 90) {
-                          colorClass = 'text-emerald-600';
-                        } else if (percent >= 70) {
-                          colorClass = 'text-amber-600';
-                        } else if (percent > 0) {
-                          colorClass = 'text-rose-600';
-                        }
+              let colorClass = 'text-slate-500';
+              if (percent >= 90) {
+                colorClass = 'text-emerald-600';
+              } else if (percent >= 70) {
+                colorClass = 'text-amber-600';
+              } else if (percent > 0) {
+                colorClass = 'text-rose-600';
+              }
 
-                        return (
+              const coveragePercent =
+                totalQuestions > 0 ? (totalAttempted / totalQuestions) * 100 : 0;
+              const pendingPercent =
+                totalQuestions > 0 ? (remainingQuestions / totalQuestions) * 100 : 0;
+
+              let unassignedQuestions = null;
+              if (Array.isArray(record.missing) && record.missing.length > 0) {
+                unassignedQuestions = Array.from(
+                  new Set(
+                    record.missing
+                      .map((value) => Number.parseInt(value, 10))
+                      .filter((value) => !Number.isNaN(value))
+                  )
+                ).sort((a, b) => a - b);
+              } else if (attemptedInfo.reliable && totalQuestions > 0) {
+                const derived = [];
+                for (let index = 1; index <= totalQuestions; index += 1) {
+                  if (!attemptedInfo.set.has(index)) {
+                    derived.push(index);
+                  }
+                }
+                unassignedQuestions = derived;
+              } else if (totalQuestions > 0 && totalAttempted >= totalQuestions) {
+                unassignedQuestions = [];
+              }
+
+              const unassignedCount = Array.isArray(unassignedQuestions)
+                ? unassignedQuestions.length
+                : null;
+              const unassignedDisplay = Array.isArray(unassignedQuestions)
+                ? formatQuestionRanges(unassignedQuestions)
+                : '';
+              const coverageDisplay = percentDisplay(coveragePercent);
+              const pendingDisplay = percentDisplay(pendingPercent);
+              const fallbackIncorrect = [];
+              const fallbackManual = [];
+              Object.entries(record.questionStats ?? {}).forEach(([questionKey, value]) => {
+                const questionNumber = Number.parseInt(questionKey, 10);
+                if (Number.isNaN(questionNumber)) {
+                  return;
+                }
+                if (value?.status === 'incorrect') {
+                  fallbackIncorrect.push({
+                    question: questionNumber,
+                    studentAnswer: value.studentAnswer ?? '',
+                    correctAnswer: value.correctAnswer ?? ''
+                  });
+                } else if (value?.status === 'manual') {
+                  fallbackManual.push({
+                    question: questionNumber,
+                    answers: Array.isArray(value.manualAnswers) ? value.manualAnswers : [],
+                    reasons: Array.isArray(value.manualReasons) ? value.manualReasons : []
+                  });
+                }
+              });
+              const incorrectEntries =
+                Array.isArray(record.incorrect) && record.incorrect.length > 0
+                  ? record.incorrect
+                  : fallbackIncorrect;
+              const manualEntries =
+                Array.isArray(record.manualReview) && record.manualReview.length > 0
+                  ? record.manualReview
+                  : fallbackManual;
+
+              return (
+                <li
+                  key={record.id ?? record.date}
+                  className={`relative rounded-xl border border-white/70 bg-white p-4 pt-6 text-xs text-slate-600 shadow-sm transition ${hoverClasses} hover:bg-white`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteWorksheet(record, meta)}
+                    className="absolute left-3 top-3 inline-flex size-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition hover:border-rose-200 hover:text-rose-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-200"
+                    aria-label={`Delete logged results for ${meta.label}`}
+                  >
+                    <X className="size-3" aria-hidden />
+                  </button>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
+                      <p className="text-xs text-slate-500">
+                        <span className="font-medium">
+                          {totalAttempted} questions completed {formatDate(record.date)}
+                        </span>
+                        <br />
+                        <span className={colorClass}>
+                          {correctCount}/{totalAttempted || 0} ({percent.toFixed(0)}%) correct
+                        </span>
+                        {totalQuestions > 0 && (
                           <>
-                            <span className="font-medium">
-                              {totalAttempted} questions completed {formatDate(record.date)}
-                            </span>
                             <br />
-                            <span className={colorClass}>
-                              {correctCount}/{totalAttempted} ({percent.toFixed(0)}%) correct
+                            <span className="text-slate-400">
+                              Tracker coverage: {coverageDisplay} logged ({totalAttempted}/
+                              {totalQuestions}) · {pendingDisplay} pending upload (
+                              {remainingQuestions}/{totalQuestions})
                             </span>
-                            {remainingQuestions > 0 && (
-                              <>
-                                <br />
-                                <span className="text-slate-400">
-                                  {remainingQuestions} questions remaining on worksheet
-                                </span>
-                              </>
-                            )}
                           </>
-                        );
-                      })()}
-                    </p>
+                        )}
+                        {remainingQuestions > 0 && (
+                          <>
+                            <br />
+                            <span className="text-slate-400">
+                              {remainingQuestions} questions remaining on worksheet
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                {record.incorrect?.length ? (
+                {incorrectEntries.length ? (
                   <details className="mt-2 text-xs text-slate-600">
                     <summary className="cursor-pointer font-semibold text-slate-500">
-                      Missed ({record.incorrect.length})
+                      Missed ({incorrectEntries.length})
                     </summary>
                     <ul className="mt-1 space-y-1">
-                      {record.incorrect.map((item) => (
+                      {incorrectEntries.map((item) => (
                         <li key={`${item.question}-${item.studentAnswer}`}>
                           Question {item.question}: {item.studentAnswer}
                           {' -> '}
@@ -269,13 +461,13 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                     </ul>
                   </details>
                 ) : null}
-                {record.manualReview?.length ? (
+                {manualEntries.length ? (
                   <details className="mt-2 text-xs text-slate-600">
                     <summary className="cursor-pointer font-semibold text-slate-500">
-                      Manual review ({record.manualReview.length})
+                      Manual review ({manualEntries.length})
                     </summary>
                     <ul className="mt-1 space-y-1">
-                      {record.manualReview.map((item) => (
+                      {manualEntries.map((item) => (
                         <li key={item.question}>
                           Question {item.question}: {item.answers.join(', ')} (
                           {item.reasons.join('; ')})
@@ -284,44 +476,24 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                     </ul>
                   </details>
                 ) : null}
-                {(() => {
-                  const totalQuestions = meta.total || meta.key?.size || 0;
-                  const attemptedQuestions = new Set();
-
-                  if (record.incorrect) {
-                    record.incorrect.forEach((item) => attemptedQuestions.add(item.question));
-                  }
-
-                  if (record.manualReview) {
-                    record.manualReview.forEach((item) => attemptedQuestions.add(item.question));
-                  }
-
-                  const questionStats = record.questionStats || {};
-                  Object.keys(questionStats).forEach((q) => {
-                    const questionNum = Number.parseInt(q, 10);
-                    if (!Number.isNaN(questionNum)) {
-                      attemptedQuestions.add(questionNum);
-                    }
-                  });
-
-                  const unassignedQuestions = [];
-                  for (let i = 1; i <= totalQuestions; i += 1) {
-                    if (!attemptedQuestions.has(i)) {
-                      unassignedQuestions.push(i);
-                    }
-                  }
-
-                  return unassignedQuestions.length > 0 ? (
-                    <details className="mt-2 text-xs text-slate-600">
-                      <summary className="cursor-pointer font-semibold text-slate-500">
-                        Unassigned ({unassignedQuestions.length})
-                      </summary>
-                      <div className="mt-1 text-slate-500">
-                        Questions: {unassignedQuestions.join(', ')}
-                      </div>
-                    </details>
-                  ) : null;
-                })()}
+                {unassignedQuestions !== null ? (
+                  <details className="mt-2 text-xs text-slate-600">
+                    <summary className="cursor-pointer font-semibold text-slate-500">
+                      Unassigned ({unassignedCount ?? 0})
+                    </summary>
+                    <div className="mt-1 text-slate-500">
+                      {unassignedCount ? (
+                        <>Questions: {unassignedDisplay}</>
+                      ) : (
+                        'No outstanding questions.'
+                      )}
+                    </div>
+                  </details>
+                ) : totalQuestions > 0 ? (
+                  <p className="mt-2 text-xs text-slate-400">
+                    Upload the latest grading to see unassigned question ranges.
+                  </p>
+                ) : null}
                 <div className="mt-2 flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -346,7 +518,8 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                   </label>
                 </div>
               </li>
-            ))}
+              );
+            })}`
           </ul>
         )}
       </div>
