@@ -55,32 +55,24 @@ function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
         <ClipboardCopy className="size-4 text-slate-400" aria-hidden />
       </div>
       <div className="mt-3 space-y-4">
-        {Object.entries(groupedWorksheets).map(([subject, priorities]) => {
-          const hasAnyWorksheets = Object.values(priorities).some(arr => arr.length > 0);
-          if (!hasAnyWorksheets) return null;
-          
+        {TOPIC_PRIORITY_ORDER.map((priorityKey) => {
+          const englishItems = groupedWorksheets.english[priorityKey] || [];
+          const mathItems = groupedWorksheets.math[priorityKey] || [];
+          if (englishItems.length === 0 && mathItems.length === 0) return null;
+
           return (
-            <div key={subject} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className={`h-px flex-1 ${subject === 'english' ? 'bg-blue-200' : 'bg-red-200'}`}></div>
-                <h4 className={`text-xs font-semibold uppercase tracking-wide ${subject === 'english' ? 'text-blue-600' : 'text-red-600'}`}>
-                  {subject === 'english' ? 'English' : 'Math'}
-                </h4>
-                <div className={`h-px flex-1 ${subject === 'english' ? 'bg-blue-200' : 'bg-red-200'}`}></div>
-              </div>
-              
-              {TOPIC_PRIORITY_ORDER.map((priorityKey) => {
-                const worksheetsForPriority = priorities[priorityKey];
-                if (worksheetsForPriority.length === 0) {
-                  return null;
-                }
-                return (
-                  <div key={priorityKey} className={`rounded-2xl p-3 ${subject === 'english' ? 'bg-blue-50' : 'bg-red-50'}`}>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {PRIORITY_LEVELS[priorityKey]}
-                    </p>
+            <div key={priorityKey} className="rounded-2xl bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {PRIORITY_LEVELS[priorityKey]}
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">English</p>
+                  {englishItems.length === 0 ? (
+                    <p className="mt-2 text-xs text-slate-400">None</p>
+                  ) : (
                     <ul className="mt-2 space-y-1 text-xs text-slate-600">
-                      {worksheetsForPriority.map((item) => (
+                      {englishItems.map((item) => (
                         <li
                           key={item.id}
                           className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-slate-200 hover:bg-white"
@@ -94,9 +86,7 @@ function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
                                   ...(student.topicChecklist ?? {}),
                                   [item.id]: event.target.checked
                                 };
-                                onUpdate(() => ({
-                                  topicChecklist: nextChecklist
-                                }));
+                                onUpdate(() => ({ topicChecklist: nextChecklist }));
                               }}
                             />
                             {item.label}
@@ -104,9 +94,39 @@ function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
                         </li>
                       ))}
                     </ul>
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Math</p>
+                  {mathItems.length === 0 ? (
+                    <p className="mt-2 text-xs text-slate-400">None</p>
+                  ) : (
+                    <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                      {mathItems.map((item) => (
+                        <li
+                          key={item.id}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-transparent px-2 py-1 transition hover:border-slate-200 hover:bg-white"
+                        >
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(checklist[item.id])}
+                              onChange={(event) => {
+                                const nextChecklist = {
+                                  ...(student.topicChecklist ?? {}),
+                                  [item.id]: event.target.checked
+                                };
+                                onUpdate(() => ({ topicChecklist: nextChecklist }));
+                              }}
+                            />
+                            {item.label}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
             </div>
           );
         })}
