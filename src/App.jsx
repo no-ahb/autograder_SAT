@@ -126,7 +126,7 @@ function formatDateValue(value) {
   }
 }
 
-function formatReport(result) {
+function formatReport(result, date = null) {
   if (!result) {
     return '';
   }
@@ -143,7 +143,11 @@ function formatReport(result) {
 
   const summaryLine = `${correct} / ${denominator || total} correct (${FRACTION_FORMATTER.format(percent)}%)`;
 
-  const lines = [`Worksheet: ${keyName}`, summaryLine, ''];
+  const lines = [`Worksheet: ${keyName}`];
+  if (date) {
+    lines.push(`uploaded ${formatDateValue(date)}`);
+  }
+  lines.push(summaryLine, '');
 
   if (incorrect.length > 0) {
     lines.push(
@@ -495,19 +499,13 @@ function ResultCard({ result }) {
                   </span>
                 );
               } else if (status === 'manual') {
-                containerClasses = 'rounded-lg border border-amber-200 bg-amber-50 px-2 py-2 text-center transition';
-                const manualSummary = Array.isArray(item.manualAnswers)
-                  ? item.manualAnswers.join(', ')
-                  : item.studentAnswer;
-                const reasonsSummary = Array.isArray(item.manualReasons)
-                  ? item.manualReasons.join('; ')
-                  : '';
+                containerClasses = 'rounded-lg border border-yellow-200 bg-yellow-50 px-2 py-2 text-center transition';
                 answerNode = (
                   <span
-                    className="text-sm font-semibold text-amber-600"
-                    title={reasonsSummary || 'Manual review pending'}
+                    className="text-sm font-semibold text-yellow-600"
+                    title="Manual review pending"
                   >
-                    {(manualSummary || '?').toString().toUpperCase()}
+                    *
                   </span>
                 );
               } else {
@@ -644,7 +642,7 @@ export default function App() {
   const filteredStudents = useMemo(() => {
     const term = studentSearchTerm.trim().toLowerCase();
     if (!term) {
-      return students.slice(0, 8);
+      return [];
     }
     return students
       .filter((student) => student.name.toLowerCase().includes(term))
@@ -1157,12 +1155,34 @@ export default function App() {
   };
 
   const handleCopyReport = async () => {
-    if (!result) {
+    if (!result || !currentWorksheetRecord) {
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(result.report);
+      // Get the most recent history entry (last viable input)
+      const historyList = Array.isArray(currentWorksheetRecord.history) ? currentWorksheetRecord.history : [];
+      const latestHistory = historyList.length > 0 ? historyList[0] : null;
+      
+      let reportText = '';
+      if (latestHistory) {
+        // Format report from the latest history entry
+        const historyReport = {
+          keyName: selectedKey?.label ?? result.keyName,
+          correct: latestHistory.correct,
+          incorrect: latestHistory.incorrect ?? [],
+          manualReview: latestHistory.manualReview ?? [],
+          denominator: latestHistory.attempted ?? latestHistory.total,
+          total: latestHistory.total,
+          percent: latestHistory.percent ?? (latestHistory.attempted > 0 ? (latestHistory.correct / latestHistory.attempted) * 100 : 0)
+        };
+        reportText = formatReport(historyReport, latestHistory.recordedAt);
+      } else {
+        // Fallback to current result
+        reportText = result.report;
+      }
+      
+      await navigator.clipboard.writeText(reportText);
       setCopyStatus('Summary copied');
       window.setTimeout(() => setCopyStatus(''), 1500);
     } catch {

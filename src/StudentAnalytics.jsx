@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { ClipboardCopy, Plus, UserCircle2, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ClipboardCopy, Plus, UserCircle2, X, Pencil, Check } from 'lucide-react';
 import { PRIORITY_LEVELS, WORKSHEET_PRIORITY, COURSE_GUIDELINES } from './studentMetadata.js';
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -59,6 +59,33 @@ function formatQuestionRanges(numbers) {
 
   ranges.push(rangeStart === previous ? `${rangeStart}` : `${rangeStart}-${previous}`);
   return ranges.join(', ');
+}
+
+function formatWorksheetSummary(record, meta) {
+  if (!record || !meta) {
+    return '';
+  }
+
+  const totalQuestions = record.totalQuestions ?? meta.total ?? 0;
+  const correct = record.correct ?? 0;
+  const denominator = record.denominator ?? totalQuestions;
+  const percent = record.percent ?? (denominator > 0 ? (correct / denominator) * 100 : 0);
+  const incorrect = Array.isArray(record.incorrect) ? record.incorrect : [];
+  
+  const lines = [`Worksheet: ${meta.label}`];
+  lines.push(`${correct} / ${denominator} correct (${percent.toFixed(1)}%)`);
+  lines.push('');
+
+  if (incorrect.length > 0) {
+    lines.push('Incorrect:');
+    incorrect.forEach((item) => {
+      lines.push(`  ${item.question}: student ${item.studentAnswer} -> key ${item.correctAnswer}`);
+    });
+  } else {
+    lines.push('Incorrect: none');
+  }
+
+  return lines.join('\n');
 }
 
 function deriveAttemptedInfo(record) {
@@ -449,21 +476,37 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                   key={record.id ?? record.date}
                   className={`relative rounded-xl border border-white/70 bg-white p-4 pt-6 text-xs text-slate-600 shadow-sm transition ${hoverClasses} hover:bg-white`}
                 >
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteWorksheet(record, meta)}
-                    className="absolute right-3 top-3 inline-flex size-6 items-center justify-center text-slate-400 transition hover:text-rose-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-200"
-                    aria-label={`Delete logged results for ${meta.label}`}
-                  >
-                    <X className="size-4" aria-hidden />
-                  </button>
+                  <div className="absolute right-3 top-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const summary = formatWorksheetSummary(record, meta);
+                        try {
+                          await navigator.clipboard.writeText(summary);
+                        } catch {
+                          // Clipboard blocked
+                        }
+                      }}
+                      className="inline-flex size-6 items-center justify-center text-slate-400 transition hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+                      aria-label={`Copy summary for ${meta.label}`}
+                    >
+                      <ClipboardCopy className="size-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteWorksheet(record, meta)}
+                      className="inline-flex size-6 items-center justify-center text-slate-400 transition hover:text-rose-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-200"
+                      aria-label={`Delete logged results for ${meta.label}`}
+                    >
+                      <X className="size-4" aria-hidden />
+                    </button>
+                  </div>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
                       <p className="text-xs text-slate-500">
                         <span className="font-medium">
-                          Latest update {formatDate(record.date)} · {totalAttempted} of{' '}
-                          {totalQuestions || '—'} logged
+                          {formatDate(record.date)} · {totalAttempted} questions graded
                         </span>
                         <br />
                         <span className={colorClass}>
@@ -471,10 +514,6 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                         </span>
                         {totalQuestions > 0 ? (
                           <>
-                            <br />
-                            <span className="text-slate-400">
-                              Coverage: {coverageDisplay} logged · {pendingDisplay} pending upload
-                            </span>
                             <br />
                             <span className="text-slate-400">
                               {totalCompletionPercent.toFixed(1)}% of worksheet covered ·{' '}
@@ -506,7 +545,7 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                                 <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 shadow-sm shadow-white">
                                   <div>
                                     <p className="font-semibold text-slate-700">
-                                      {entry.attempted || 0} questions completed {entryDate}
+                                      {entryDate}
                                     </p>
                                     <p className="mt-1 text-slate-500">
                                       {entry.correct}/{entry.attempted || 0} ({entryPercent}%)
@@ -576,53 +615,6 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                     )}
                     <div className="rounded-2xl border border-slate-100 bg-white/90 p-3 text-xs text-slate-600">
                       <p className="font-semibold text-slate-700">Total progress</p>
-                      {totalQuestions > 0 ? (
-                        <p className="mt-1 text-slate-500">
-                          {totalAttempted}/{totalQuestions} completed (
-                          {totalCompletionPercent.toFixed(1)}%) · {remainingQuestions} remaining (
-                          {remainingPercent.toFixed(1)}%)
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-slate-500">{totalAttempted} questions logged</p>
-                      )}
-                      {incorrectEntries.length ? (
-                        <details className="mt-2 text-xs">
-                          <summary className="cursor-pointer font-semibold text-slate-600">
-                            Currently incorrect ({incorrectEntries.length})
-                          </summary>
-                          <ul className="mt-1 space-y-1 text-slate-600">
-                            {incorrectEntries.map((item) => (
-                              <li key={`${record.id ?? record.date}-agg-miss-${item.question}`}>
-                                Question {item.question}:{' '}
-                                {(item.studentAnswer || '—').toString().toUpperCase()}
-                                {' -> '}
-                                {(item.correctAnswer || '—').toString().toUpperCase()}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : (
-                        <p className="mt-2 text-xs text-emerald-600">
-                          No outstanding incorrect responses.
-                        </p>
-                      )}
-                      {manualEntries.length ? (
-                        <details className="mt-2 text-xs">
-                          <summary className="cursor-pointer font-semibold text-slate-600">
-                            Manual review ({manualEntries.length})
-                          </summary>
-                          <ul className="mt-1 space-y-1 text-slate-600">
-                            {manualEntries.map((item) => (
-                              <li key={`${record.id ?? record.date}-agg-manual-${item.question}`}>
-                                Question {item.question}: {item.answers.join(', ')}
-                                <span className="block text-[11px] text-slate-400">
-                                  {item.reasons.join('; ')}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
                       {unassignedQuestions !== null ? (
                         <details className="mt-2 text-xs">
                           <summary className="cursor-pointer font-semibold text-slate-600">
@@ -652,10 +644,69 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     );
   };
 
+  const overallPercentages = useMemo(() => {
+    let englishCorrect = 0;
+    let englishTotal = 0;
+    let mathCorrect = 0;
+    let mathTotal = 0;
+
+    assignedList.forEach(({ record, subject }) => {
+      if (!record) return;
+      const correct = record.correct ?? 0;
+      const denominator = record.denominator ?? record.totalQuestions ?? 0;
+      if (denominator === 0) return;
+
+      if (subject === 'english') {
+        englishCorrect += correct;
+        englishTotal += denominator;
+      } else {
+        mathCorrect += correct;
+        mathTotal += denominator;
+      }
+    });
+
+    const englishOverall = englishTotal > 0 ? (englishCorrect / englishTotal) * 100 : 0;
+    const mathOverall = mathTotal > 0 ? (mathCorrect / mathTotal) * 100 : 0;
+
+    return { englishOverall, mathOverall };
+  }, [assignedList]);
+
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-slate-900">Worksheets</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={async () => {
+              const text = `Overall English: ${overallPercentages.englishOverall.toFixed(1)}%`;
+              try {
+                await navigator.clipboard.writeText(text);
+              } catch {
+                // Clipboard blocked
+              }
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-600 transition hover:border-blue-300 hover:bg-blue-100"
+            title="Click to copy overall English percentage"
+          >
+            English: {overallPercentages.englishOverall.toFixed(1)}%
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const text = `Overall Math: ${overallPercentages.mathOverall.toFixed(1)}%`;
+              try {
+                await navigator.clipboard.writeText(text);
+              } catch {
+                // Clipboard blocked
+              }
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+            title="Click to copy overall Math percentage"
+          >
+            Math: {overallPercentages.mathOverall.toFixed(1)}%
+          </button>
+        </div>
         <p className="text-xs text-slate-500">
           {(() => {
             const englishAssigned = assignedList.filter((item) => item.subject === 'english').length;
@@ -728,18 +779,41 @@ function PracticeTestsColumn({
   onUpdateCustomPractice,
   onDeleteCustomPractice
 }) {
+  const [isEditing, setIsEditing] = useState(false);
+
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">Practice tests</h2>
-        <button
-          type="button"
-          onClick={onAddCustomPractice}
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
-        >
-          <Plus className="size-3.5" aria-hidden />
-          Add custom
-        </button>
+        <div className="flex items-center gap-2">
+          {isEditing && (
+            <button
+              type="button"
+              onClick={onAddCustomPractice}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+            >
+              <Plus className="size-3.5" aria-hidden />
+              Add custom
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsEditing(!isEditing)}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+          >
+            {isEditing ? (
+              <>
+                <Check className="size-3.5" aria-hidden />
+                Save
+              </>
+            ) : (
+              <>
+                <Pencil className="size-3.5" aria-hidden />
+                Edit
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 space-y-4">
@@ -753,59 +827,95 @@ function PracticeTestsColumn({
                 key={test.id}
                 className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-700">{test.label}</span>
-                  <input
-                    type="date"
-                    value={test.date ?? ''}
-                    onChange={(event) => onUpdatePractice(test.id, 'date', event.target.value)}
-                    className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                  />
-                </div>
-                <div className="mt-2 space-y-2">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[10px] uppercase text-slate-500">Overall score</span>
-                    <input
-                      type="number"
-                      min="200"
-                      max="1600"
-                      placeholder="—"
-                      value={test.composite ?? ''}
-                      onChange={(event) =>
-                        onUpdatePractice(test.id, 'composite', event.target.value)
-                      }
-                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                    />
-                  </label>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[10px] uppercase text-slate-500">English</span>
+                {isEditing ? (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-700">{test.label}</span>
                       <input
-                        type="number"
-                        min="10"
-                        max="800"
-                        placeholder="—"
-                        value={test.readingWriting ?? ''}
-                        onChange={(event) =>
-                          onUpdatePractice(test.id, 'readingWriting', event.target.value)
-                        }
+                        type="date"
+                        value={test.date ?? ''}
+                        onChange={(event) => onUpdatePractice(test.id, 'date', event.target.value)}
                         className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
                       />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[10px] uppercase text-slate-500">Math</span>
-                      <input
-                        type="number"
-                        min="10"
-                        max="800"
-                        placeholder="—"
-                        value={test.math ?? ''}
-                        onChange={(event) => onUpdatePractice(test.id, 'math', event.target.value)}
-                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                      />
-                    </label>
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase text-slate-500">Overall score</span>
+                        <input
+                          type="number"
+                          min="200"
+                          max="1600"
+                          placeholder="—"
+                          value={test.composite ?? ''}
+                          onChange={(event) =>
+                            onUpdatePractice(test.id, 'composite', event.target.value)
+                          }
+                          className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                        />
+                      </label>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase text-slate-500">English</span>
+                          <input
+                            type="number"
+                            min="10"
+                            max="800"
+                            placeholder="—"
+                            value={test.readingWriting ?? ''}
+                            onChange={(event) =>
+                              onUpdatePractice(test.id, 'readingWriting', event.target.value)
+                            }
+                            className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase text-slate-500">Math</span>
+                          <input
+                            type="number"
+                            min="10"
+                            max="800"
+                            placeholder="—"
+                            value={test.math ?? ''}
+                            onChange={(event) => onUpdatePractice(test.id, 'math', event.target.value)}
+                            className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-slate-700">{test.label}</span>
+                      {test.date ? (
+                        <span className="text-slate-500">{formatDate(test.date)}</span>
+                      ) : null}
+                    </div>
+                    {test.composite || test.readingWriting || test.math ? (
+                      <div className="mt-2 space-y-1 text-xs text-slate-600">
+                        {test.composite ? (
+                          <p>
+                            <span className="font-semibold">Overall:</span> {test.composite}
+                          </p>
+                        ) : null}
+                        {(test.readingWriting || test.math) && (
+                          <div className="flex gap-4">
+                            {test.readingWriting ? (
+                              <p>
+                                <span className="font-semibold">English:</span> {test.readingWriting}
+                              </p>
+                            ) : null}
+                            {test.math ? (
+                              <p>
+                                <span className="font-semibold">Math:</span> {test.math}
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
-                </div>
+                )}
               </li>
             ))}
           </ul>
@@ -824,73 +934,109 @@ function PracticeTestsColumn({
                 key={test.id}
                 className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-700">{test.label}</span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={test.date ?? ''}
-                      onChange={(event) =>
-                        onUpdateCustomPractice(test.id, 'date', event.target.value)
-                      }
-                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => onDeleteCustomPractice(test.id)}
-                      className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
-                    >
-                      <X className="size-3" aria-hidden />
-                      Delete
-                    </button>
+                {isEditing ? (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-700">{test.label}</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          value={test.date ?? ''}
+                          onChange={(event) =>
+                            onUpdateCustomPractice(test.id, 'date', event.target.value)
+                          }
+                          className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => onDeleteCustomPractice(test.id)}
+                          className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
+                        >
+                          <X className="size-3" aria-hidden />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase text-slate-500">Overall score</span>
+                        <input
+                          type="number"
+                          min="200"
+                          max="1600"
+                          placeholder="—"
+                          value={test.composite ?? ''}
+                          onChange={(event) =>
+                            onUpdateCustomPractice(test.id, 'composite', event.target.value)
+                          }
+                          className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                        />
+                      </label>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase text-slate-500">English</span>
+                          <input
+                            type="number"
+                            min="10"
+                            max="800"
+                            placeholder="—"
+                            value={test.readingWriting ?? ''}
+                            onChange={(event) =>
+                              onUpdateCustomPractice(test.id, 'readingWriting', event.target.value)
+                            }
+                            className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase text-slate-500">Math</span>
+                          <input
+                            type="number"
+                            min="10"
+                            max="800"
+                            placeholder="—"
+                            value={test.math ?? ''}
+                            onChange={(event) =>
+                              onUpdateCustomPractice(test.id, 'math', event.target.value)
+                            }
+                            className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-slate-700">{test.label}</span>
+                      {test.date ? (
+                        <span className="text-slate-500">{formatDate(test.date)}</span>
+                      ) : null}
+                    </div>
+                    {test.composite || test.readingWriting || test.math ? (
+                      <div className="mt-2 space-y-1 text-xs text-slate-600">
+                        {test.composite ? (
+                          <p>
+                            <span className="font-semibold">Overall:</span> {test.composite}
+                          </p>
+                        ) : null}
+                        {(test.readingWriting || test.math) && (
+                          <div className="flex gap-4">
+                            {test.readingWriting ? (
+                              <p>
+                                <span className="font-semibold">English:</span> {test.readingWriting}
+                              </p>
+                            ) : null}
+                            {test.math ? (
+                              <p>
+                                <span className="font-semibold">Math:</span> {test.math}
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-                <div className="mt-2 space-y-2">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[10px] uppercase text-slate-500">Overall score</span>
-                    <input
-                      type="number"
-                      min="200"
-                      max="1600"
-                      placeholder="—"
-                      value={test.composite ?? ''}
-                      onChange={(event) =>
-                        onUpdateCustomPractice(test.id, 'composite', event.target.value)
-                      }
-                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                    />
-                  </label>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[10px] uppercase text-slate-500">English</span>
-                      <input
-                        type="number"
-                        min="10"
-                        max="800"
-                        placeholder="—"
-                        value={test.readingWriting ?? ''}
-                        onChange={(event) =>
-                          onUpdateCustomPractice(test.id, 'readingWriting', event.target.value)
-                        }
-                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[10px] uppercase text-slate-500">Math</span>
-                      <input
-                        type="number"
-                        min="10"
-                        max="800"
-                        placeholder="—"
-                        value={test.math ?? ''}
-                        onChange={(event) =>
-                          onUpdateCustomPractice(test.id, 'math', event.target.value)
-                        }
-                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                      />
-                    </label>
-                  </div>
-                </div>
+                )}
               </li>
             ))}
           </ul>
@@ -901,139 +1047,228 @@ function PracticeTestsColumn({
 }
 
 function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTest, onDeleteRealTest }) {
+  const [isEditing, setIsEditing] = useState(false);
   const realTests = student.realTests ?? [];
-  const completedOfficial = realTests.filter((item) => item.status === 'completed');
-  const upcomingOfficial = realTests.filter((item) => item.status !== 'completed');
+  const completedOfficial = realTests
+    .filter((item) => item.status === 'completed')
+    .sort((a, b) => {
+      const dateA = a.date ?? '';
+      const dateB = b.date ?? '';
+      if (dateA === dateB) return 0;
+      return dateB.localeCompare(dateA); // Newest to oldest
+    });
+  const upcomingOfficial = realTests
+    .filter((item) => item.status !== 'completed')
+    .sort((a, b) => {
+      const dateA = a.date ?? '';
+      const dateB = b.date ?? '';
+      if (dateA === dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateA.localeCompare(dateB); // Nearest to furthest
+    });
 
   return (
     <section className="space-y-4">
       <div className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">SAT timeline</h2>
-          <button
-            type="button"
-            onClick={onAddRealTest}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
-          >
-            <Plus className="size-3.5" aria-hidden />
-            Add official test
-          </button>
+          <div className="flex items-center gap-2">
+            {isEditing && (
+              <button
+                type="button"
+                onClick={onAddRealTest}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+              >
+                <Plus className="size-3.5" aria-hidden />
+                Add official test
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsEditing(!isEditing)}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+            >
+              {isEditing ? (
+                <>
+                  <Check className="size-3.5" aria-hidden />
+                  Save
+                </>
+              ) : (
+                <>
+                  <Pencil className="size-3.5" aria-hidden />
+                  Edit
+                </>
+              )}
+            </button>
+          </div>
         </div>
         <div className="mt-4 space-y-4 text-sm text-slate-600">
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-semibold uppercase text-slate-500">Next SAT date</span>
-            <input
-              type="date"
-              value={student.upcomingSatDate ?? ''}
-              onChange={(event) =>
-                onUpdate(() => ({
-                  upcomingSatDate: event.target.value
-                }))
-              }
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
-          </label>
+          {isEditing ? (
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-semibold uppercase text-slate-500">Next SAT date</span>
+              <input
+                type="date"
+                value={student.upcomingSatDate ?? ''}
+                onChange={(event) =>
+                  onUpdate(() => ({
+                    upcomingSatDate: event.target.value
+                  }))
+                }
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+          ) : (
+            <div className="text-xs">
+              <p className="font-semibold uppercase text-slate-500">Next SAT date</p>
+              <p className="mt-1 text-slate-700">
+                {student.upcomingSatDate ? formatDate(student.upcomingSatDate) : '—'}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-3">
-            {completedOfficial.length > 0 ? (
+            {upcomingOfficial.length > 0 ? (
               <div className="rounded-2xl bg-slate-50 p-3 text-xs">
-                <p className="font-semibold text-slate-600">Completed</p>
-                <ul className="mt-2 space-y-1 text-slate-600">
-                  {completedOfficial.map((test) => (
-                    <li key={test.id} className="rounded-lg border border-slate-100 bg-white p-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span>{formatDate(test.date)}</span>
-                        <div className="flex items-center gap-2">
+                <p className="font-semibold text-slate-600">Upcoming</p>
+                <ul className="mt-2 space-y-2 text-slate-600">
+                  {upcomingOfficial.map((test) => (
+                    <li key={test.id} className="relative rounded-lg border border-slate-100 bg-white p-2 pr-8">
+                      {isEditing && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteRealTest(test.id)}
+                          className="absolute right-2 top-2 inline-flex size-6 items-center justify-center text-slate-400 transition hover:text-rose-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-200"
+                          aria-label="Delete upcoming test"
+                        >
+                          <X className="size-4" aria-hidden />
+                        </button>
+                      )}
+                      {isEditing ? (
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <input
+                              type="date"
+                              value={test.date ?? ''}
+                              onChange={(event) =>
+                                onUpdateRealTest(test.id, 'date', event.target.value)
+                              }
+                              className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                            />
+                            <select
+                              value={test.status ?? 'upcoming'}
+                              onChange={(event) =>
+                                onUpdateRealTest(test.id, 'status', event.target.value)
+                              }
+                              className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                            >
+                              <option value="upcoming">Scheduled</option>
+                              <option value="completed">Completed</option>
+                            </select>
+                          </div>
                           <input
-                            type="number"
-                            placeholder="Composite"
-                            value={test.composite ?? ''}
-                            onChange={(event) =>
-                              onUpdateRealTest(test.id, 'composite', event.target.value)
-                            }
-                            className="w-24 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                            type="text"
+                            placeholder="Notes"
+                            value={test.notes ?? ''}
+                            onChange={(event) => onUpdateRealTest(test.id, 'notes', event.target.value)}
+                            className="mt-2 w-full rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
                           />
-                          <button
-                            type="button"
-                            onClick={() => onDeleteRealTest(test.id)}
-                            className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
-                          >
-                            <X className="size-3" aria-hidden />
-                            Delete
-                          </button>
+                        </>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-slate-700">
+                              {test.date ? formatDate(test.date) : 'TBD'}
+                            </span>
+                            {test.notes && (
+                              <span className="text-xs text-slate-500">{test.notes}</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        <label className="flex flex-col gap-1">
-                          <span className="text-[10px] uppercase text-slate-500">Reading/Writing</span>
-                          <input
-                            type="number"
-                            value={test.readingWriting ?? ''}
-                            onChange={(event) =>
-                              onUpdateRealTest(test.id, 'readingWriting', event.target.value)
-                            }
-                            className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-[10px] uppercase text-slate-500">Math</span>
-                          <input
-                            type="number"
-                            value={test.math ?? ''}
-                            onChange={(event) => onUpdateRealTest(test.id, 'math', event.target.value)}
-                            className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                          />
-                        </label>
-                      </div>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
             ) : null}
 
-            {upcomingOfficial.length > 0 ? (
+            {completedOfficial.length > 0 ? (
               <div className="rounded-2xl bg-slate-50 p-3 text-xs">
-                <p className="font-semibold text-slate-600">Upcoming</p>
-                <ul className="mt-2 space-y-2 text-slate-600">
-                  {upcomingOfficial.map((test) => (
-                    <li key={test.id} className="rounded-lg border border-slate-100 bg-white p-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <input
-                          type="date"
-                          value={test.date ?? ''}
-                          onChange={(event) =>
-                            onUpdateRealTest(test.id, 'date', event.target.value)
-                          }
-                          className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                        />
-                        <div className="flex items-center gap-2">
-                          <select
-                            value={test.status ?? 'upcoming'}
-                            onChange={(event) =>
-                              onUpdateRealTest(test.id, 'status', event.target.value)
-                            }
-                            className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                          >
-                            <option value="upcoming">Scheduled</option>
-                            <option value="completed">Completed</option>
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteRealTest(test.id)}
-                            className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-200"
-                          >
-                            <X className="size-3" aria-hidden />
-                            Delete
-                          </button>
+                <p className="font-semibold text-slate-600">Completed</p>
+                <ul className="mt-2 space-y-1 text-slate-600">
+                  {completedOfficial.map((test) => (
+                    <li key={test.id} className="relative rounded-lg border border-slate-100 bg-white p-2 pr-8">
+                      {isEditing && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteRealTest(test.id)}
+                          className="absolute right-2 top-2 inline-flex size-6 items-center justify-center text-slate-400 transition hover:text-rose-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-200"
+                          aria-label={`Delete test from ${formatDate(test.date)}`}
+                        >
+                          <X className="size-4" aria-hidden />
+                        </button>
+                      )}
+                      {isEditing ? (
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{formatDate(test.date)}</span>
+                            <input
+                              type="number"
+                              placeholder="Composite"
+                              value={test.composite ?? ''}
+                              onChange={(event) =>
+                                onUpdateRealTest(test.id, 'composite', event.target.value)
+                              }
+                              className="w-24 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                            />
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <label className="flex flex-col gap-1">
+                              <span className="text-[10px] uppercase text-slate-500">Reading/Writing</span>
+                              <input
+                                type="number"
+                                value={test.readingWriting ?? ''}
+                                onChange={(event) =>
+                                  onUpdateRealTest(test.id, 'readingWriting', event.target.value)
+                                }
+                                className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1">
+                              <span className="text-[10px] uppercase text-slate-500">Math</span>
+                              <input
+                                type="number"
+                                value={test.math ?? ''}
+                                onChange={(event) => onUpdateRealTest(test.id, 'math', event.target.value)}
+                                className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
+                              />
+                            </label>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-slate-700">{formatDate(test.date)}</span>
+                            {test.composite && (
+                              <span className="text-slate-600">Composite: {test.composite}</span>
+                            )}
+                          </div>
+                          {(test.readingWriting || test.math) && (
+                            <div className="flex gap-4 text-xs text-slate-600">
+                              {test.readingWriting && (
+                                <span>
+                                  <span className="font-semibold">Reading/Writing:</span> {test.readingWriting}
+                                </span>
+                              )}
+                              {test.math && (
+                                <span>
+                                  <span className="font-semibold">Math:</span> {test.math}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Notes"
-                        value={test.notes ?? ''}
-                        onChange={(event) => onUpdateRealTest(test.id, 'notes', event.target.value)}
-                        className="mt-2 w-full rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
-                      />
+                      )}
                     </li>
                   ))}
                 </ul>

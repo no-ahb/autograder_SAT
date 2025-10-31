@@ -1,15 +1,28 @@
 # TODO
-- [ ] Backfill existing worksheet records with an initial history entry so legacy data surfaces in the new log view.
-- [ ] Audit the scorecard grid on smaller devices and adjust column counts if readability is an issue.
+- 
 
 # QUESTIONS
-- Should the manual review status show additional messaging in the scorecard legend (e.g., tooltip text or a dedicated color key)?
+- 
 
 # NOTES
-- Worksheet uploads now append to `history`; toggling Reviewed in class? updates each entry independently and keeps the legacy `reviewedMisses` flag synced for the newest log.
-- The scorecard grid reads from persisted question stats, so prior uploads appear immediately after grading.
+- need to create a detailed brief for breaking down SAT categories like the UES scoretracker and assessing areas for improvement that also reflects the bluebook's metrics to build up an individualized profile for each student that has charts, tracks improvement over time, etc....
+- create a test day predictor averaging last 3 scores in the section practice/real test
+- I want to create a 3rd page just for myself when i'm teaching with all the answer keys readily avail, so i can click on a worksheet and see what hte answers are
 
 # COMPLETED
+
+10.31.2025
+- [x] Remove redundancy on Analytics page scorecards - simplified wording, removed duplicate "Coverage" line, simplified "Total progress" section to only show "Questions remaining"
+- [x] Changed manual review status to "*" with yellow color (instead of showing answers/reasons)
+- [x] Changed "Delete" buttons for SAT official tests to match worksheets - simple X in top right corner
+- [x] Reordered SAT timeline - "upcoming" above "completed", completed ordered newest to oldest, upcoming ordered nearest to furthest
+- [x] Fixed search students behavior - no longer shows recent searches or other students when clicking the search tab (only shows results when typing)
+- [x] Added "copy summary" button to analytics page worksheet scorecard that copies the entire worksheet summary
+- [x] Fixed "copy summary" button on UPLOAD page to show summary of last viable input with date included in format: "Worksheet: [name], uploaded [date], [score], Incorrect: [list]"
+- [x] Added "overall" percentage buttons for Math and English that aggregate performance across all questions (clickable to copy)
+- [x] Created save/edit buttons for "practice tests" and "SAT Timeline" sections - inputs are non-editable in saved mode, showing condensed formatted text instead of input boxes
+
+10.26.2025
 - [x] Update README with feature highlights and licensing guidance.
 - [x] Redesign the worksheet scorecard to show every question with status-aware coloring.
 - [x] Widen the analytics view, refresh practice test inputs, and reposition the Reference module beneath Practice + SAT timeline.
