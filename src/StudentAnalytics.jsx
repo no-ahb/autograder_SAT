@@ -753,7 +753,7 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                   </div>
                 </li>
               );
-            })}`
+            })}
           </ul>
         )}
       </div>
