@@ -630,12 +630,12 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                         ) : null}
                       </p>
                     </div>
-                  ) : null}
+                  </div>
                   {!isCollapsed ? (
                     <div className="mt-4 space-y-4">
-                    {historyList.length > 0 ? (
-                      <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {historyList.length > 0 ? (
+                        <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Upload log
                         </p>
                         <ul className="mt-2 list-disc space-y-3 pl-4 text-xs text-slate-600 marker:text-slate-400">
