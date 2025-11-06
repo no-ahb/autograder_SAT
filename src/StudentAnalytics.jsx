@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ClipboardCopy, Plus, UserCircle2, X, Pencil, Check } from 'lucide-react';
+import {
+  ClipboardCopy,
+  Plus,
+  UserCircle2,
+  X,
+  Pencil,
+  Check,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react';
 import { PRIORITY_LEVELS, WORKSHEET_PRIORITY, COURSE_GUIDELINES } from './studentMetadata.js';
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -247,6 +256,7 @@ function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
 
 function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
   const [lastDeletedHistory, setLastDeletedHistory] = useState(null);
+  const [collapsedCards, setCollapsedCards] = useState({});
 
   const worksheetMap = useMemo(() => {
     const assigned = new Map();
@@ -398,6 +408,16 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     });
   };
 
+  const toggleWorksheetCollapsed = (cardId) => {
+    if (!cardId) {
+      return;
+    }
+    setCollapsedCards((previous) => ({
+      ...previous,
+      [cardId]: !previous?.[cardId]
+    }));
+  };
+
   const SubjectPanel = ({ subject, items }) => {
     const isEnglish = subject === 'english';
     const panelClasses = isEnglish
@@ -542,6 +562,8 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                 totalQuestions > 0 ? (totalAttempted / totalQuestions) * 100 : 0;
               const remainingPercent =
                 totalQuestions > 0 ? (remainingQuestions / totalQuestions) * 100 : 0;
+              const cardId = record?.worksheetId ?? record?.id ?? meta.id;
+              const isCollapsed = Boolean(collapsedCards[cardId]);
 
               return (
                 <li
@@ -549,6 +571,19 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                   className={`relative rounded-xl border border-white/70 bg-white p-4 pt-6 text-xs text-slate-600 shadow-sm transition ${hoverClasses} hover:bg-white`}
                 >
                   <div className="absolute right-3 top-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleWorksheetCollapsed(cardId)}
+                      className="inline-flex size-6 items-center justify-center text-slate-400 transition hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-200"
+                      aria-expanded={!isCollapsed}
+                      aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} details for ${meta.label}`}
+                    >
+                      {isCollapsed ? (
+                        <ChevronDown className="size-4" aria-hidden />
+                      ) : (
+                        <ChevronUp className="size-4" aria-hidden />
+                      )}
+                    </button>
                     <button
                       type="button"
                       onClick={async () => {
@@ -595,8 +630,9 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                         ) : null}
                       </p>
                     </div>
-                  </div>
-                  <div className="mt-4 space-y-4">
+                  ) : null}
+                  {!isCollapsed ? (
+                    <div className="mt-4 space-y-4">
                     {historyList.length > 0 ? (
                       <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -1354,7 +1390,7 @@ function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTes
                           <div className="flex items-center justify-between">
                             <span className="font-semibold text-slate-700">{formatDate(test.date)}</span>
                             {test.composite && (
-                              <span className="text-slate-600">Composite: {test.composite}</span>
+                              <span className="text-slate-600 font-semibold">{test.composite}</span>
                             )}
                           </div>
                           {(test.readingWriting || test.math) && (
@@ -1496,10 +1532,10 @@ function ScoreTrendChart({ data }) {
   }
 
   const width = 640;
-  const height = 220;
+  const height = 280;
   const paddingX = 48;
-  const paddingYTop = 36;
-  const paddingYBottom = 40;
+  const paddingYTop = 48;
+  const paddingYBottom = 48;
   const minScore = 400;
   const maxScore = 1600;
   const range = maxScore - minScore;
@@ -1553,13 +1589,13 @@ function ScoreTrendChart({ data }) {
     ticks.push(score);
   }
 
-  const labelOffset = 14;
+  const labelOffset = 16;
 
   return (
     <div className="mt-4">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-60 w-full"
+        className="h-72 w-full"
         role="img"
         aria-label="Score trends chart"
       >
@@ -1637,8 +1673,36 @@ function ScoreTrendChart({ data }) {
             }
             return value < (compositeY ?? value) ? -labelOffset : labelOffset + 4;
           };
-          const englishOffset = computeOffset(englishY, [compositeY, mathY]);
-          const mathOffset = computeOffset(mathY, [compositeY, englishY]);
+          let englishOffset = computeOffset(englishY, [compositeY, mathY]);
+          let mathOffset = computeOffset(mathY, [compositeY, englishY]);
+
+          if (englishY !== null && mathY !== null) {
+            if (englishY <= mathY) {
+              englishOffset = -labelOffset;
+              mathOffset = labelOffset + 6;
+            } else {
+              mathOffset = -labelOffset;
+              englishOffset = labelOffset + 6;
+            }
+          }
+
+          const adjustForCompositeLabel = (value, offset) => {
+            if (!validY(value) || typeof offset !== 'number') {
+              return offset;
+            }
+            if (!validY(compositeY)) {
+              return offset;
+            }
+            const compositeLabelY = (compositeY ?? 0) - labelOffset;
+            const labelY = value + offset;
+            if (Math.abs(labelY - compositeLabelY) < 10) {
+              return offset + (offset < 0 ? -6 : 6);
+            }
+            return offset;
+          };
+
+          englishOffset = adjustForCompositeLabel(englishY, englishOffset);
+          mathOffset = adjustForCompositeLabel(mathY, mathOffset);
           return (
             <g key={`${item.date}-${index}`}>
               {compositeY !== null ? (
@@ -1850,7 +1914,7 @@ export function StudentAnalytics({
           <div className="space-y-4 lg:col-span-2">
             <WorksheetsColumn student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
           </div>
-          <div className="lg:col-span-1">
+          <div className="space-y-6 lg:col-span-1">
             <PracticeTestsColumn
               student={student}
               onAddCustomPractice={onAddCustomPractice}
@@ -1858,8 +1922,9 @@ export function StudentAnalytics({
               onUpdateCustomPractice={onUpdateCustomPractice}
               onDeleteCustomPractice={onDeleteCustomPractice}
             />
+            <TestDayPredictor student={student} />
           </div>
-          <div className="lg:col-span-1">
+          <div className="space-y-6 lg:col-span-1">
             <OfficialTestsColumn
               student={student}
               onUpdate={onUpdate}
@@ -1867,9 +1932,6 @@ export function StudentAnalytics({
               onUpdateRealTest={onUpdateRealTest}
               onDeleteRealTest={onDeleteRealTest}
             />
-          </div>
-          <div className="flex flex-col gap-6 lg:col-span-2 lg:col-start-3">
-            <TestDayPredictor student={student} />
             <ReferenceColumn onDeleteStudent={onDeleteStudent} />
           </div>
         </div>

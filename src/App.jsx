@@ -414,7 +414,7 @@ function ResultCard({ result }) {
             <p className="text-sm font-semibold text-slate-700">Worksheet report</p>
             <p className="text-[11px] uppercase tracking-wide text-slate-400">Live per question</p>
           </div>
-          <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-1 font-mono text-sm">
+          <div className="mt-3 columns-1 gap-x-4 sm:columns-2 lg:columns-3 font-mono text-sm">
             {result.questionStates.map((item) => {
               const status = item.status;
               const questionLabel = item.question;
@@ -441,7 +441,10 @@ function ResultCard({ result }) {
               }
 
               return (
-                <div key={questionLabel} className="flex items-center gap-2">
+                <div
+                  key={questionLabel}
+                  className="mb-1 flex items-center gap-2 break-inside-avoid"
+                >
                   <span className="text-slate-500 font-medium">{questionLabel}.</span>
                   <span className={answerColor}>{answerText}</span>
                 </div>

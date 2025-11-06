@@ -1,5 +1,10 @@
 # TODO
-
+1. Make it so that the scorecards with the upload log on the student analysis page are collapsible to just the header above the upload log.
+2. remove the word "composite" from the completed official test scorecard
+3. move the 'test day predictor' module nd the 'reference' module DIRECTLY beneath the "practice tests" and "SAT Timeline" module, not all the way at the bottom of the page below the "worksheets" module to the right. 
+4. Make the 'test day predictor" module taller, so that the graph is less squished.
+5. if the red line is above the blue line, the red number should be above the blue line, then the red line, then the blue line, then the blue number beneath the blue line. If the blue line is on top, that order should be reversed. this way, the numbers showing the respective math and english scores won't overlap with eachother. Understand?
+6. on the "upload" page, the columns should read ascending top to bottom in column 1, then top to bottom in column 2, then top to bottom in column 3. 
 
 # QUESTIONS
 - 
