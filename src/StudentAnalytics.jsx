@@ -17,7 +17,6 @@ const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   day: 'numeric'
 });
 
-const PRIORITY_ORDER = ['high', 'medium', 'low', 'other'];
 const TOPIC_PRIORITY_ORDER = ['high', 'medium', 'low'];
 
 function formatDate(value) {
@@ -42,6 +41,14 @@ function extractBluebookNumber(label) {
   }
   const match = label.match(/(\d+)/);
   return match ? Number.parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+function toTimestamp(value) {
+  if (!value) {
+    return 0;
+  }
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
 }
 
 function percentDisplay(value) {
@@ -303,19 +310,21 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
           const record = worksheetMap.get(item.id);
           const subject = item.id.startsWith('math') ? 'math' : 'english';
           const priority = WORKSHEET_PRIORITY[item.id] ?? 'other';
+          const latestHistoryTimestamp =
+            Array.isArray(record?.history) && record.history.length > 0
+              ? toTimestamp(record.history[0].recordedAt)
+              : 0;
+          const recordTimestamp = toTimestamp(record?.date);
+          const lastGradedAt = Math.max(latestHistoryTimestamp, recordTimestamp, 0);
           return {
             meta: item,
             record,
             subject,
-            priority
+            priority,
+            lastGradedAt
           };
         })
-        .sort((a, b) => {
-          const dateA = a.record?.date ?? '';
-          const dateB = b.record?.date ?? '';
-          if (dateA === dateB) return 0;
-          return dateA > dateB ? -1 : 1;
-        }),
+        .sort((a, b) => b.lastGradedAt - a.lastGradedAt),
     [worksheetMap, worksheetsMeta]
   );
 
@@ -324,17 +333,10 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     [worksheetMap, worksheetsMeta]
   );
 
-  const assignedByPriority = useMemo(() => {
-    const grouped = {};
-    for (const priority of PRIORITY_ORDER) {
-      grouped[priority] = { english: [], math: [] };
-    }
-    for (const item of assignedList) {
-      const priority = PRIORITY_ORDER.includes(item.priority) ? item.priority : 'other';
-      const bucket = grouped[priority] ?? grouped.other;
-      bucket[item.subject].push(item);
-    }
-    return grouped;
+  const assignedBySubject = useMemo(() => {
+    const english = assignedList.filter((item) => item.subject === 'english');
+    const math = assignedList.filter((item) => item.subject === 'math');
+    return { english, math };
   }, [assignedList]);
 
   const handleDeleteWorksheet = (record, meta) => {
@@ -437,6 +439,12 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
         ) : (
           <ul className="mt-2 space-y-2">
             {items.map(({ meta, record }) => {
+              const rawLabel = meta.label ?? '';
+              const cleanedLabel = rawLabel.replace(
+                isEnglish ? /^english\s*/i : /^math\s*/i,
+                ''
+              ).trim();
+              const displayLabel = cleanedLabel.length > 0 ? cleanedLabel : rawLabel;
               const totalQuestions =
                 record.totalQuestions ?? meta.total ?? meta.key?.size ?? 0;
               const attemptedInfo = deriveAttemptedInfo(record);
@@ -610,7 +618,7 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                   </div>
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">{meta.label}</p>
+                      <p className="text-sm font-semibold text-slate-800">{displayLabel}</p>
                       <p className="text-xs text-slate-500">
                         <span className="font-medium">
                           {formatDate(record.date)} · {totalAttempted} questions graded
@@ -855,33 +863,9 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
         </p>
       </div>
 
-      <div className="mt-4 space-y-4">
-        {PRIORITY_ORDER.map((priorityKey) => {
-          const group = assignedByPriority[priorityKey] ?? { english: [], math: [] };
-          const heading =
-            priorityKey === 'other' ? 'Additional Worksheets' : PRIORITY_LEVELS[priorityKey];
-          const hasAssignments = group.english.length > 0 || group.math.length > 0;
-
-          if (!hasAssignments && priorityKey !== 'other') {
-            return null;
-          }
-
-          return (
-            <div key={priorityKey} className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {heading}
-              </p>
-              {hasAssignments ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <SubjectPanel subject="english" items={group.english} />
-                  <SubjectPanel subject="math" items={group.math} />
-                </div>
-              ) : (
-                <p className="mt-1 text-xs text-slate-400">No work logged yet.</p>
-              )}
-            </div>
-          );
-        })}
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <SubjectPanel subject="english" items={assignedBySubject.english} />
+        <SubjectPanel subject="math" items={assignedBySubject.math} />
       </div>
 
       <TopicChecklist student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
@@ -894,7 +878,8 @@ function PracticeTestsColumn({
   onAddCustomPractice,
   onUpdatePractice,
   onUpdateCustomPractice,
-  onDeleteCustomPractice
+  onDeleteCustomPractice,
+  variant = 'standalone'
 }) {
   const [isEditing, setIsEditing] = useState(false);
 
@@ -916,10 +901,19 @@ function PracticeTestsColumn({
     return [...taken, ...upcoming];
   }, [student.practiceTests]);
 
+  const containerClasses =
+    variant === 'contained'
+      ? 'rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm shadow-white'
+      : 'rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100';
+  const headingClasses =
+    variant === 'contained'
+      ? 'text-base font-semibold text-slate-900'
+      : 'text-lg font-semibold text-slate-900';
+
   return (
-    <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
+    <section className={containerClasses}>
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">Practice tests</h2>
+        <h2 className={headingClasses}>Practice tests</h2>
         <div className="flex items-center gap-2">
           {isEditing && (
             <button
@@ -1187,7 +1181,14 @@ function PracticeTestsColumn({
   );
 }
 
-function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTest, onDeleteRealTest }) {
+function OfficialTestsColumn({
+  student,
+  onUpdate,
+  onAddRealTest,
+  onUpdateRealTest,
+  onDeleteRealTest,
+  variant = 'standalone'
+}) {
   const [isEditing, setIsEditing] = useState(false);
   const realTests = student.realTests ?? [];
   const completedOfficial = realTests
@@ -1209,11 +1210,20 @@ function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTes
       return dateA.localeCompare(dateB); // Nearest to furthest
     });
 
+  const cardClasses =
+    variant === 'contained'
+      ? 'rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm shadow-white'
+      : 'rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100';
+  const headingClasses =
+    variant === 'contained'
+      ? 'text-base font-semibold text-slate-900'
+      : 'text-lg font-semibold text-slate-900';
+
   return (
     <section className="space-y-4">
-      <div className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
+      <div className={cardClasses}>
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">SAT timeline</h2>
+          <h2 className={headingClasses}>SAT timeline</h2>
           <div className="flex items-center gap-2">
             {isEditing && (
               <button
@@ -1421,6 +1431,42 @@ function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTes
             ) : null}
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function AssessmentsColumn({
+  student,
+  onAddCustomPractice,
+  onUpdatePractice,
+  onUpdateCustomPractice,
+  onDeleteCustomPractice,
+  onUpdate,
+  onAddRealTest,
+  onUpdateRealTest,
+  onDeleteRealTest
+}) {
+  return (
+    <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
+      <h2 className="text-lg font-semibold text-slate-900">Practice tests &amp; SAT timeline</h2>
+      <div className="mt-4 space-y-4">
+        <PracticeTestsColumn
+          student={student}
+          onAddCustomPractice={onAddCustomPractice}
+          onUpdatePractice={onUpdatePractice}
+          onUpdateCustomPractice={onUpdateCustomPractice}
+          onDeleteCustomPractice={onDeleteCustomPractice}
+          variant="contained"
+        />
+        <OfficialTestsColumn
+          student={student}
+          onUpdate={onUpdate}
+          onAddRealTest={onAddRealTest}
+          onUpdateRealTest={onUpdateRealTest}
+          onDeleteRealTest={onDeleteRealTest}
+          variant="contained"
+        />
       </div>
     </section>
   );
@@ -1911,28 +1957,23 @@ export function StudentAnalytics({
       </header>
 
       <main className="mx-auto mt-6 max-w-[90rem] px-4">
-        <div className="grid gap-8 lg:grid-cols-4 xl:grid-cols-4">
-          <div className="space-y-4 lg:col-span-2">
+        <div className="grid gap-8 lg:grid-cols-2">
+          <div className="space-y-6">
             <WorksheetsColumn student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
           </div>
-          <div className="space-y-6 lg:col-span-1">
-            <PracticeTestsColumn
+          <div className="space-y-6">
+            <AssessmentsColumn
               student={student}
               onAddCustomPractice={onAddCustomPractice}
               onUpdatePractice={onUpdatePractice}
               onUpdateCustomPractice={onUpdateCustomPractice}
               onDeleteCustomPractice={onDeleteCustomPractice}
-            />
-            <TestDayPredictor student={student} />
-          </div>
-          <div className="space-y-6 lg:col-span-1">
-            <OfficialTestsColumn
-              student={student}
               onUpdate={onUpdate}
               onAddRealTest={onAddRealTest}
               onUpdateRealTest={onUpdateRealTest}
               onDeleteRealTest={onDeleteRealTest}
             />
+            <TestDayPredictor student={student} />
             <ReferenceColumn onDeleteStudent={onDeleteStudent} />
           </div>
         </div>
