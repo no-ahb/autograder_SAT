@@ -729,28 +729,29 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                         No uploads logged yet. Grade this worksheet to start the history.
                       </div>
                     )}
-                    <div className="rounded-2xl border border-slate-100 bg-white/90 p-3 text-xs text-slate-600">
-                      <p className="font-semibold text-slate-700">Total progress</p>
-                      {unassignedQuestions !== null ? (
-                        <details className="mt-2 text-xs">
-                          <summary className="cursor-pointer font-semibold text-slate-600">
-                            Questions remaining ({unassignedCount ?? 0})
-                          </summary>
-                          <div className="mt-1 text-slate-500">
-                            {unassignedCount ? (
-                              <>Questions: {unassignedDisplay}</>
-                            ) : (
-                              'No outstanding questions.'
-                            )}
-                          </div>
-                        </details>
-                      ) : totalQuestions > 0 ? (
-                        <p className="mt-2 text-xs text-slate-400">
-                          Upload the latest grading to see remaining question ranges.
-                        </p>
-                      ) : null}
+                      <div className="rounded-2xl border border-slate-100 bg-white/90 p-3 text-xs text-slate-600">
+                        <p className="font-semibold text-slate-700">Total progress</p>
+                        {unassignedQuestions !== null ? (
+                          <details className="mt-2 text-xs">
+                            <summary className="cursor-pointer font-semibold text-slate-600">
+                              Questions remaining ({unassignedCount ?? 0})
+                            </summary>
+                            <div className="mt-1 text-slate-500">
+                              {unassignedCount ? (
+                                <>Questions: {unassignedDisplay}</>
+                              ) : (
+                                'No outstanding questions.'
+                              )}
+                            </div>
+                          </details>
+                        ) : totalQuestions > 0 ? (
+                          <p className="mt-2 text-xs text-slate-400">
+                            Upload the latest grading to see remaining question ranges.
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                 </li>
               );
             })}
