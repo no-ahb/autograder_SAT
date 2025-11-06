@@ -885,35 +885,33 @@ function PracticeTestsColumn({
                   </>
                 ) : (
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-700">{test.label}</span>
-                      {test.date ? (
-                        <span className="text-slate-500">{formatDate(test.date)}</span>
-                      ) : null}
-                    </div>
                     {test.composite || test.readingWriting || test.math ? (
-                      <div className="mt-2 space-y-1 text-xs text-slate-600">
+                      <p className="text-xs text-slate-700">
+                        <span className="font-semibold">{test.label}:</span>{' '}
                         {test.composite ? (
-                          <p>
-                            <span className="font-semibold">Overall:</span> {test.composite}
-                          </p>
+                          <span>{test.composite}</span>
                         ) : null}
-                        {(test.readingWriting || test.math) && (
-                          <div className="flex gap-4">
+                        {test.readingWriting || test.math ? (
+                          <>
+                            {test.composite ? ' ' : ''}
                             {test.readingWriting ? (
-                              <p>
-                                <span className="font-semibold">English:</span> {test.readingWriting}
-                              </p>
+                              <span className="text-blue-600 font-medium">{test.readingWriting}</span>
                             ) : null}
+                            {test.readingWriting && test.math ? ' ' : ''}
                             {test.math ? (
-                              <p>
-                                <span className="font-semibold">Math:</span> {test.math}
-                              </p>
+                              <span className="text-rose-600 font-medium">{test.math}</span>
                             ) : null}
-                          </div>
-                        )}
+                          </>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-700">{test.label}</span>
+                        {test.date ? (
+                          <span className="text-slate-500 text-xs">{formatDate(test.date)}</span>
+                        ) : null}
                       </div>
-                    ) : null}
+                    )}
                   </div>
                 )}
               </li>
@@ -1006,35 +1004,33 @@ function PracticeTestsColumn({
                   </>
                 ) : (
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-700">{test.label}</span>
-                      {test.date ? (
-                        <span className="text-slate-500">{formatDate(test.date)}</span>
-                      ) : null}
-                    </div>
                     {test.composite || test.readingWriting || test.math ? (
-                      <div className="mt-2 space-y-1 text-xs text-slate-600">
+                      <p className="text-xs text-slate-700">
+                        <span className="font-semibold">{test.label}:</span>{' '}
                         {test.composite ? (
-                          <p>
-                            <span className="font-semibold">Overall:</span> {test.composite}
-                          </p>
+                          <span>{test.composite}</span>
                         ) : null}
-                        {(test.readingWriting || test.math) && (
-                          <div className="flex gap-4">
+                        {test.readingWriting || test.math ? (
+                          <>
+                            {test.composite ? ' ' : ''}
                             {test.readingWriting ? (
-                              <p>
-                                <span className="font-semibold">English:</span> {test.readingWriting}
-                              </p>
+                              <span className="text-blue-600 font-medium">{test.readingWriting}</span>
                             ) : null}
+                            {test.readingWriting && test.math ? ' ' : ''}
                             {test.math ? (
-                              <p>
-                                <span className="font-semibold">Math:</span> {test.math}
-                              </p>
+                              <span className="text-rose-600 font-medium">{test.math}</span>
                             ) : null}
-                          </div>
-                        )}
+                          </>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-700">{test.label}</span>
+                        {test.date ? (
+                          <span className="text-slate-500 text-xs">{formatDate(test.date)}</span>
+                        ) : null}
                       </div>
-                    ) : null}
+                    )}
                   </div>
                 )}
               </li>
@@ -1285,6 +1281,82 @@ function OfficialTestsColumn({ student, onUpdate, onAddRealTest, onUpdateRealTes
   );
 }
 
+function TestDayPredictor({ student }) {
+  // Get all practice and real tests with dates and composite scores
+  const allTests = useMemo(() => {
+    const tests = [];
+    
+    // Add practice tests
+    (student.practiceTests ?? []).forEach((test) => {
+      if (test.date && test.composite) {
+        tests.push({
+          date: test.date,
+          composite: Number.parseInt(test.composite, 10),
+          type: 'practice'
+        });
+      }
+    });
+    
+    // Add custom practice tests
+    (student.customPracticeTests ?? []).forEach((test) => {
+      if (test.date && test.composite) {
+        tests.push({
+          date: test.date,
+          composite: Number.parseInt(test.composite, 10),
+          type: 'practice'
+        });
+      }
+    });
+    
+    // Add completed real tests
+    (student.realTests ?? [])
+      .filter((test) => test.status === 'completed' && test.date && test.composite)
+      .forEach((test) => {
+        tests.push({
+          date: test.date,
+          composite: Number.parseInt(test.composite, 10),
+          type: 'real'
+        });
+      });
+    
+    // Sort by date (newest first)
+    return tests.sort((a, b) => {
+      if (a.date === b.date) return 0;
+      return b.date.localeCompare(a.date);
+    });
+  }, [student]);
+  
+  // Get last 3 scores
+  const lastThreeScores = allTests.slice(0, 3);
+  const averageScore = lastThreeScores.length > 0
+    ? Math.round(lastThreeScores.reduce((sum, test) => sum + test.composite, 0) / lastThreeScores.length)
+    : null;
+  
+  if (!averageScore) {
+    return null;
+  }
+  
+  return (
+    <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
+      <h2 className="text-sm font-semibold text-slate-800">Test day predictor</h2>
+      <div className="mt-3">
+        <p className="text-xs text-slate-500">Average of last 3 scores</p>
+        <p className="mt-1 text-2xl font-semibold text-slate-900">{averageScore}</p>
+        {lastThreeScores.length > 0 && (
+          <div className="mt-2 space-y-1 text-xs text-slate-600">
+            {lastThreeScores.map((test, index) => (
+              <div key={index} className="flex items-center justify-between">
+                <span>{formatDate(test.date)}</span>
+                <span className="font-medium">{test.composite}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ReferenceColumn({ onDeleteStudent }) {
   const orderedGuidelines = useMemo(() => {
     const sections = [...COURSE_GUIDELINES];
@@ -1431,8 +1503,6 @@ export function StudentAnalytics({
               onUpdateCustomPractice={onUpdateCustomPractice}
               onDeleteCustomPractice={onDeleteCustomPractice}
             />
-          </div>
-          <div className="space-y-4 lg:col-span-1">
             <OfficialTestsColumn
               student={student}
               onUpdate={onUpdate}
@@ -1440,8 +1510,7 @@ export function StudentAnalytics({
               onUpdateRealTest={onUpdateRealTest}
               onDeleteRealTest={onDeleteRealTest}
             />
-          </div>
-          <div className="space-y-4 lg:col-span-2 lg:col-start-3">
+            <TestDayPredictor student={student} />
             <ReferenceColumn onDeleteStudent={onDeleteStudent} />
           </div>
         </div>

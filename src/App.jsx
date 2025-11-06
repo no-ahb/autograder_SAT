@@ -184,95 +184,63 @@ function buildResultFromWorksheetRecord(record, keyMeta) {
   }
 
   const totalQuestions = record.total ?? record.totalQuestions ?? keyMeta.total ?? 0;
-  const questionStats = record.questionStats ?? {};
-  const statsEntries = Object.entries(questionStats);
-  const fallbackIncorrect = [];
-  const fallbackManual = [];
-  const statsAttempted = [];
-  let statsHasCorrect = false;
+  
+  // Use most recent history entry for scorecard (todo 6)
+  const historyList = Array.isArray(record.history) ? record.history : [];
+  const latestHistory = historyList.length > 0 ? historyList[0] : null;
+  
+  // If we have a latest history entry, use it for the scorecard
+  const incorrect = latestHistory && Array.isArray(latestHistory.incorrect) && latestHistory.incorrect.length > 0
+    ? latestHistory.incorrect
+    : Array.isArray(record.incorrect) && record.incorrect.length > 0
+      ? record.incorrect
+      : [];
+  
+  const manualReview = latestHistory && Array.isArray(latestHistory.manualReview) && latestHistory.manualReview.length > 0
+    ? latestHistory.manualReview
+    : Array.isArray(record.manualReview) && record.manualReview.length > 0
+      ? record.manualReview
+      : [];
 
-  for (const [questionKey, value] of statsEntries) {
-    const question = Number.parseInt(questionKey, 10);
-    if (Number.isNaN(question)) {
-      continue;
-    }
-    statsAttempted.push(question);
-    if (value?.status === 'correct') {
-      statsHasCorrect = true;
-    } else if (value?.status === 'incorrect') {
-      fallbackIncorrect.push({
-        question,
-        correctAnswer: value.correctAnswer ?? keyMeta.key.get(question) ?? '',
-        studentAnswer: value.studentAnswer ?? ''
-      });
-    } else if (value?.status === 'manual') {
-      fallbackManual.push({
-        question,
-        answers: Array.isArray(value.manualAnswers) ? value.manualAnswers : [],
-        reasons: Array.isArray(value.manualReasons) ? value.manualReasons : []
-      });
-    }
-  }
-
-  const incorrect = Array.isArray(record.incorrect) && record.incorrect.length > 0
-    ? record.incorrect
-    : fallbackIncorrect;
-  const manualReview = Array.isArray(record.manualReview) && record.manualReview.length > 0
-    ? record.manualReview
-    : fallbackManual.map((item) => ({
-        question: item.question,
-        answers: item.answers,
-        reasons: item.reasons
-      }));
-
-  const incorrectCount = record.incorrectCount ?? incorrect.length;
-  const manualReviewCount = record.manualReviewCount ?? manualReview.length;
-  const skipMissing = typeof record.skipMissingUsed === 'boolean' ? record.skipMissingUsed : true;
-
-  let attemptedArray = [];
-  let attemptedReliable = false;
-  if (Array.isArray(record.attemptedQuestions) && record.attemptedQuestions.length > 0) {
-    attemptedArray = record.attemptedQuestions
-      .map((value) => Number.parseInt(value, 10))
-      .filter((value) => !Number.isNaN(value));
-    attemptedReliable = attemptedArray.length > 0;
-  } else if (statsEntries.length > 0) {
-    attemptedArray = statsAttempted.slice();
-    attemptedReliable = statsHasCorrect || (record.correct ?? 0) === 0;
-  }
-  attemptedArray = Array.from(new Set(attemptedArray)).sort((a, b) => a - b);
-
-  const totalAttempted = record.totalAttempted ?? attemptedArray.length;
+  const incorrectCount = latestHistory ? (latestHistory.incorrectCount ?? latestHistory.incorrect?.length ?? 0) : (record.incorrectCount ?? incorrect.length);
+  const manualReviewCount = latestHistory ? (latestHistory.manualReviewCount ?? latestHistory.manualReview?.length ?? 0) : (record.manualReviewCount ?? manualReview.length);
+  const skipMissing = latestHistory ? (latestHistory.skipMissingUsed ?? true) : (typeof record.skipMissingUsed === 'boolean' ? record.skipMissingUsed : true);
+  
+  // Use latest history for correct count and attempted questions
+  const correct = latestHistory ? (latestHistory.correct ?? 0) : (record.correct ?? 0);
+  const attemptedArray = latestHistory && Array.isArray(latestHistory.missing) && latestHistory.total
+    ? (() => {
+        const attempted = new Set();
+        for (let i = 1; i <= latestHistory.total; i++) {
+          if (!latestHistory.missing.includes(i)) {
+            attempted.add(i);
+          }
+        }
+        return Array.from(attempted).sort((a, b) => a - b);
+      })()
+    : Array.isArray(record.attemptedQuestions) && record.attemptedQuestions.length > 0
+      ? record.attemptedQuestions.map((v) => Number.parseInt(v, 10)).filter((v) => !Number.isNaN(v)).sort((a, b) => a - b)
+      : [];
+  
   const attemptedSet = new Set(attemptedArray);
-  const correct =
-    record.correct ??
-    (statsHasCorrect
-      ? statsEntries.filter(([, value]) => value?.status === 'correct').length
-      : 0);
+  const missing = latestHistory && Array.isArray(latestHistory.missing)
+    ? latestHistory.missing.slice().sort((a, b) => a - b)
+    : Array.isArray(record.missing) ? record.missing.slice().sort((a, b) => a - b) : [];
+  const missingCount = latestHistory ? (latestHistory.missingCount ?? missing.length) : (record.missingCount ?? missing.length);
+  
+  const denominator = latestHistory
+    ? (skipMissing ? Math.max((latestHistory.total ?? totalQuestions) - missingCount, 0) : (latestHistory.total ?? totalQuestions))
+    : (record.denominator ?? (skipMissing ? Math.max(totalQuestions - missingCount, 0) : totalQuestions));
+  
+  const percent = latestHistory
+    ? (latestHistory.percent ?? (denominator > 0 ? (correct / denominator) * 100 : 0))
+    : (typeof record.percent === 'number'
+        ? record.percent
+        : denominator > 0
+          ? (correct / denominator) * 100
+          : 0);
 
-  let missing = Array.isArray(record.missing) ? record.missing.slice() : [];
-  if (missing.length === 0 && attemptedReliable && totalQuestions > 0) {
-    const attemptedSet = new Set(attemptedArray);
-    missing = [];
-    for (let index = 1; index <= totalQuestions; index += 1) {
-      if (!attemptedSet.has(index)) {
-        missing.push(index);
-      }
-    }
-  }
-  missing.sort((a, b) => a - b);
-  const missingCount = record.missingCount ?? missing.length;
-
-  const denominator =
-    record.denominator ??
-    (skipMissing ? Math.max(totalQuestions - missingCount, 0) : totalQuestions);
-
-  const percent =
-    typeof record.percent === 'number'
-      ? record.percent
-      : denominator > 0
-        ? (correct / denominator) * 100
-        : 0;
+  const totalAttempted = latestHistory ? (latestHistory.attempted ?? attemptedArray.length) : (record.totalAttempted ?? attemptedArray.length);
 
   const result = {
     total: totalQuestions,
@@ -292,14 +260,7 @@ function buildResultFromWorksheetRecord(record, keyMeta) {
     attemptedQuestions: attemptedArray
   };
 
-  const statsMap = new Map();
-  statsEntries.forEach(([questionKey, value]) => {
-    const questionNumber = Number.parseInt(questionKey, 10);
-    if (!Number.isNaN(questionNumber)) {
-      statsMap.set(questionNumber, value);
-    }
-  });
-
+  // Build questionStates from latest history (not aggregated stats)
   const incorrectMap = new Map(
     incorrect.map((item) => [item.question, item])
   );
@@ -309,30 +270,18 @@ function buildResultFromWorksheetRecord(record, keyMeta) {
   const missingSet = new Set(missing);
   const highestQuestion = Math.max(
     totalQuestions,
-    ...Array.from(statsMap.keys()),
     ...incorrect.map((item) => item.question),
-    ...manualReview.map((item) => item.question)
+    ...manualReview.map((item) => item.question),
+    ...attemptedArray
   );
   const scoreboardTotal = Number.isFinite(highestQuestion) && highestQuestion > 0 ? highestQuestion : totalQuestions;
   const questionStates = [];
 
   for (let index = 1; index <= scoreboardTotal; index += 1) {
-    const stat = statsMap.get(index);
     const keyAnswer = keyMeta.key?.get(index) ?? '';
-    if (stat?.status === 'correct') {
-      questionStates.push({
-        question: index,
-        status: 'correct',
-        studentAnswer: (stat.studentAnswer ?? keyAnswer ?? '').toString().toUpperCase(),
-        correctAnswer: keyAnswer
-      });
-      continue;
-    }
-    if (stat?.status === 'incorrect' || incorrectMap.has(index)) {
-      const incorrectEntry = incorrectMap.get(index) ?? {
-        studentAnswer: stat?.studentAnswer ?? '',
-        correctAnswer: stat?.correctAnswer ?? keyAnswer
-      };
+    
+    if (incorrectMap.has(index)) {
+      const incorrectEntry = incorrectMap.get(index);
       questionStates.push({
         question: index,
         status: 'incorrect',
@@ -341,18 +290,25 @@ function buildResultFromWorksheetRecord(record, keyMeta) {
       });
       continue;
     }
-    if (stat?.status === 'manual' || manualMap.has(index)) {
-      const manualEntry = manualMap.get(index) ?? {
-        answers: Array.isArray(stat?.manualAnswers) ? stat.manualAnswers : [],
-        reasons: Array.isArray(stat?.manualReasons) ? stat.manualReasons : []
-      };
+    if (manualMap.has(index)) {
+      const manualEntry = manualMap.get(index);
       questionStates.push({
         question: index,
         status: 'manual',
-        studentAnswer: manualEntry.answers?.[0] ?? (stat?.studentAnswer ?? ''),
+        studentAnswer: manualEntry.answers?.[0] ?? '',
         correctAnswer: keyAnswer,
         manualAnswers: manualEntry.answers ?? [],
         manualReasons: manualEntry.reasons ?? []
+      });
+      continue;
+    }
+    if (attemptedSet.has(index) && !missingSet.has(index)) {
+      // This question was attempted correctly in latest upload
+      questionStates.push({
+        question: index,
+        status: 'correct',
+        studentAnswer: keyAnswer,
+        correctAnswer: keyAnswer
       });
       continue;
     }
@@ -360,15 +316,6 @@ function buildResultFromWorksheetRecord(record, keyMeta) {
       questionStates.push({
         question: index,
         status: 'unanswered',
-        studentAnswer: '',
-        correctAnswer: keyAnswer
-      });
-      continue;
-    }
-    if (attemptedSet.has(index)) {
-      questionStates.push({
-        question: index,
-        status: 'attempted',
         studentAnswer: '',
         correctAnswer: keyAnswer
       });
@@ -464,60 +411,39 @@ function ResultCard({ result }) {
       {hasQuestionStates ? (
         <div className="mt-6">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-700">Worksheet scorecard</p>
+            <p className="text-sm font-semibold text-slate-700">Worksheet report</p>
             <p className="text-[11px] uppercase tracking-wide text-slate-400">Live per question</p>
           </div>
-          <div className="mt-3 grid gap-2 grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+          <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-1 font-mono text-sm">
             {result.questionStates.map((item) => {
               const status = item.status;
               const questionLabel = item.question;
-              let containerClasses =
-                'rounded-lg border border-slate-200 bg-white px-2 py-2 text-center transition';
-              let answerNode = null;
+              let answerText = '';
+              let answerColor = 'text-slate-600';
 
               if (status === 'correct') {
-                containerClasses = 'rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2 text-center transition';
-                answerNode = (
-                  <span
-                    className="text-sm font-semibold text-emerald-600"
-                    title="Correct on latest record"
-                  >
-                    {(item.studentAnswer || item.correctAnswer || '').toString().toUpperCase()}
-                  </span>
-                );
+                answerText = (item.studentAnswer || item.correctAnswer || '').toString().toUpperCase();
+                answerColor = 'text-emerald-600';
               } else if (status === 'incorrect') {
-                containerClasses = 'rounded-lg border border-rose-200 bg-rose-50 px-2 py-2 text-center transition';
-                answerNode = (
-                  <span
-                    className="text-sm font-semibold text-rose-500"
-                    title={`Correct answer: ${(item.correctAnswer || '—').toString().toUpperCase()}`}
-                  >
-                    {(item.studentAnswer || '—').toString().toUpperCase()}{' '}
-                    <span className="text-xs font-medium text-slate-700">
-                      [{(item.correctAnswer || '—').toString().toUpperCase()}]
-                    </span>
-                  </span>
-                );
+                const studentAns = (item.studentAnswer || '—').toString().toUpperCase();
+                const correctAns = (item.correctAnswer || '—').toString().toUpperCase();
+                answerText = `${studentAns} [${correctAns}]`;
+                answerColor = 'text-rose-500';
               } else if (status === 'manual') {
-                containerClasses = 'rounded-lg border border-yellow-200 bg-yellow-50 px-2 py-2 text-center transition';
-                answerNode = (
-                  <span
-                    className="text-sm font-semibold text-yellow-600"
-                    title="Manual review pending"
-                  >
-                    *
-                  </span>
-                );
+                answerText = '*';
+                if (item.correctAnswer) {
+                  answerText += ` (${item.correctAnswer.toUpperCase()})`;
+                }
+                answerColor = 'text-yellow-600';
               } else {
-                answerNode = null;
+                answerText = '';
+                answerColor = 'text-slate-400';
               }
 
               return (
-                <div key={questionLabel} className={containerClasses}>
-                  <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    {questionLabel}
-                  </span>
-                  {answerNode ? <div className="mt-1 leading-none">{answerNode}</div> : null}
+                <div key={questionLabel} className="flex items-center gap-2">
+                  <span className="text-slate-500 font-medium">{questionLabel}.</span>
+                  <span className={answerColor}>{answerText}</span>
                 </div>
               );
             })}
@@ -550,12 +476,20 @@ function ResultCard({ result }) {
           <p className="mt-1 text-xl font-semibold text-slate-900">{result.manualReviewCount}</p>
           {result.manualReviewCount > 0 ? (
             <ul className="mt-2 space-y-1 text-sm text-slate-600">
-              {result.manualReview.map((item) => (
-                <li key={item.question}>
-                  {item.question}: {item.answers.join(', ')}
-                  <span className="block text-xs text-slate-500">{item.reasons.join('; ')}</span>
-                </li>
-              ))}
+              {result.manualReview.map((item) => {
+                // Get correct answer from questionStates if available
+                const questionState = result.questionStates?.find((qs) => qs.question === item.question);
+                const correctAnswer = questionState?.correctAnswer || '';
+                return (
+                  <li key={item.question}>
+                    {item.question}: {item.answers.join(', ')}
+                    {correctAnswer ? (
+                      <span className="text-slate-700"> (correct: {correctAnswer.toUpperCase()})</span>
+                    ) : null}
+                    <span className="block text-xs text-slate-500">{item.reasons.join('; ')}</span>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="mt-2 text-sm text-slate-400">Nothing pending here.</p>

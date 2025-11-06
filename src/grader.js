@@ -8,55 +8,51 @@ function scanAnswerPairs(text) {
     return pairs;
   }
 
-  // First, find all question numbers and their answers
-  // Pattern: number followed by colon/period/paren/dash variants and answer
-  const markers = Array.from(source.matchAll(/(\d{1,3})\s*(?:[:.)\-–—])/g));
-
-  markers.forEach((marker, index) => {
-    const numberRaw = marker[1];
-    const start = marker.index + marker[0].length;
-    const end = index + 1 < markers.length ? markers[index + 1].index : source.length;
-    const fullMatch = source.slice(marker.index, end);
-    const answerRaw = source
-      .slice(start, end)
-      .split(/\n|\r/)
-      .shift() ?? '';
+  // Comprehensive pattern that handles many formats:
+  // - Number directly followed by letter: 6d, 7b
+  // - Number with separator: 1) a, 1. A, 1-A, 1]a, 1...A, 1   A, etc.
+  // Pattern matches: (\d{1,3}) followed by optional separator, then any letter
+  // Separator can be: : . ) ] - – — . (ellipsis) or whitespace
+  // We capture any letter (A-Za-z) to allow non-A-E answers to be detected for manual review
+  
+  // Pattern handles both cases:
+  // 1. Number directly followed by letter (e.g., 6d, 7b)
+  // 2. Number with separator(s) followed by letter (e.g., 1) a, 1. A, 1-A, 1   A)
+  // The separator group is optional and can be punctuation or whitespace
+  const pattern = /(\d{1,3})(?:\s*[:.)\]\-–—\.]{1,3}\s*|\s+)([A-Za-z])(?=[\s\n\r]|$|[\s).,;:\-–—])|(\d{1,3})\s*([A-Za-z])(?=[\s\n\r]|$)/g;
+  
+  const matches = Array.from(source.matchAll(pattern));
+  
+  // Collect all matches (don't deduplicate here - let parseStudentAnswers handle duplicates)
+  matches.forEach((match) => {
+    // Pattern has two alternatives:
+    // 1. With separator: match[1] = number, match[2] = answer
+    // 2. Without separator: match[3] = number, match[4] = answer
+    const numberRaw = match[1] || match[3];
+    const answerRaw = match[2] || match[4];
+    
+    if (!numberRaw || !answerRaw) {
+      return;
+    }
+    
     const number = Number.parseInt(numberRaw, 10);
+    const answer = answerRaw.toUpperCase();
     
     if (Number.isNaN(number)) {
       return;
     }
-
-    const answer = answerRaw.replace(/^[\s).:,\-–—]+/, '').trim();
-    const letterMatch = answer.match(/^([A-Ea-e])([\s).,;:\-–—]*)$/);
-    const normalizedAnswer = letterMatch ? letterMatch[1].toUpperCase() : answer.toUpperCase();
-
-    // If answer is blank, empty, or contains non-answer characters, mark for manual review
-    if (
-      !answer ||
-      normalizedAnswer === '' ||
-      normalizedAnswer === '?' ||
-      normalizedAnswer === 'X' ||
-      answer.toLowerCase() === 'blank' ||
-      answer.toLowerCase() === 'skip' ||
-      !letterMatch
-    ) {
-      pairs.push({
-        question: number,
-        answer: answer || 'blank',
-        raw: fullMatch.trim(),
-        needsManualReview: true
-      });
-    } else {
-      pairs.push({
-        question: number,
-        answer: normalizedAnswer,
-        raw: fullMatch.trim(),
-        needsManualReview: false
-      });
-    }
+    
+    pairs.push({
+      question: number,
+      answer,
+      raw: match[0].trim(),
+      needsManualReview: false
+    });
   });
-
+  
+  // Sort by question number
+  pairs.sort((a, b) => a.question - b.question);
+  
   return pairs;
 }
 

@@ -4,13 +4,18 @@ A fast, client-only SAT autograder for English/Math worksheets. Upload a PDF/TXT
 
 ## Features
 
-* Paste **or** upload PDF/TXT; robust parsing (`27 C`, `27.)C`, `(27) d`, `34.b`, `32.c`).
+* Paste **or** upload PDF/TXT; robust parsing supporting many formats:
+  * Formats with separators: `27 C`, `27.)C`, `(27) d`, `34.b`, `32.c`, `1) a`, `1. A`, `1-A`, `1]a`, `1...A`, `1   A`
+  * Formats without separators: `6d`, `7b`, `1a` (number directly followed by letter)
 * Partial submissions (evens/odds/ranges/mixed).
 * Option to **skip missing** from denominator.
 * Copy-ready output: title, `X / Y correct`, wrong list, manual review, notes.
 * PDF parsing with **no external worker/CDN**.
-* Live scorecard: every worksheet shows a color-coded question grid that updates as students upload new attempts.
+* Columnar worksheet report: 3-4 columns showing question numbers with answers, color-coded by status (correct/incorrect/manual review).
+* Scorecard shows only the most recent upload (not aggregated across all attempts).
 * Student analytics dashboard with per-attempt history logs, aggregated progress, and reminders for what is still outstanding.
+* Test day score predictor: averages the last 3 practice/real test scores by date.
+* Practice test formatting: displays as "bluebook 04: 1230" with color-coded English (blue) and Math (red) subscores.
 
 ## Quick start
 
