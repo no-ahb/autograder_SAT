@@ -20,6 +20,10 @@
 - [x] Created test day score-predictor averaging last 3 scores by date across practice and real tests
 - [x] Show correct answer when there is nonstandard input in lesson report
 - [x] Scorecard on upload page now shows only most recent upload, not aggregate
+- [x] Added date-prefixed Bluebook entries with bold scores and color-coded subscores, ordered newest-first with untaken tests by number
+- [x] Added delete controls for worksheet upload log entries
+- [x] Rounded test day predictor to the nearest 10
+- [x] Added score trends line chart for overall, English, and Math scores over time
 
 10.31.2025
 - [x] Remove redundancy on Analytics page scorecards - simplified wording, removed duplicate "Coverage" line, simplified "Total progress" section to only show "Questions remaining"

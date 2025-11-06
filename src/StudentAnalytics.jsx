@@ -22,6 +22,19 @@ function formatDate(value) {
   }
 }
 
+function formatDateCompact(value) {
+  const formatted = formatDate(value);
+  return typeof formatted === 'string' ? formatted.replace(',', '') : formatted;
+}
+
+function extractBluebookNumber(label) {
+  if (!label) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  const match = label.match(/(\d+)/);
+  return match ? Number.parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+
 function percentDisplay(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     return '--';
@@ -326,6 +339,23 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     }));
   };
 
+  const handleDeleteHistoryEntry = (record, historyId) => {
+    if (!record || !historyId) {
+      return;
+    }
+    onUpdate((draft) => ({
+      worksheets: (draft.worksheets ?? []).map((worksheet) => {
+        if (worksheet.worksheetId !== record.worksheetId) {
+          return worksheet;
+        }
+        return {
+          ...worksheet,
+          history: (worksheet.history ?? []).filter((entry) => entry.id !== historyId)
+        };
+      })
+    }));
+  };
+
   const SubjectPanel = ({ subject, items }) => {
     const isEnglish = subject === 'english';
     const panelClasses = isEnglish
@@ -541,8 +571,16 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
                                   : '0';
                             const reviewedChecked = Boolean(entry.reviewed);
                             return (
-                              <li key={entry.id} className="space-y-2">
-                                <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 shadow-sm shadow-white">
+                              <li key={entry.id} className="space-y-2 relative">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteHistoryEntry(record, entry.id)}
+                                  className="absolute right-2 top-2 inline-flex size-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition hover:border-rose-200 hover:text-rose-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-200"
+                                  aria-label="Delete upload log entry"
+                                >
+                                  <X className="size-3.5" aria-hidden />
+                                </button>
+                                <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 pr-8 shadow-sm shadow-white">
                                   <div>
                                     <p className="font-semibold text-slate-700">
                                       {entryDate}
@@ -781,6 +819,24 @@ function PracticeTestsColumn({
 }) {
   const [isEditing, setIsEditing] = useState(false);
 
+  const sortedPracticeTests = useMemo(() => {
+    const tests = Array.isArray(student.practiceTests) ? [...student.practiceTests] : [];
+    const taken = tests.filter((test) => Boolean(test.date)).sort((a, b) => {
+      const dateA = a.date ?? '';
+      const dateB = b.date ?? '';
+      return dateB.localeCompare(dateA);
+    });
+    const upcoming = tests.filter((test) => !test.date).sort((a, b) => {
+      const numberA = extractBluebookNumber(a.label ?? '');
+      const numberB = extractBluebookNumber(b.label ?? '');
+      if (numberA === numberB) {
+        return (a.label ?? '').localeCompare(b.label ?? '');
+      }
+      return numberA - numberB;
+    });
+    return [...taken, ...upcoming];
+  }, [student.practiceTests]);
+
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
       <div className="flex items-center justify-between">
@@ -822,7 +878,7 @@ function PracticeTestsColumn({
             Bluebook tests
           </p>
           <ul className="mt-2 space-y-2">
-            {(student.practiceTests ?? []).map((test) => (
+            {sortedPracticeTests.map((test) => (
               <li
                 key={test.id}
                 className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600"
@@ -884,35 +940,43 @@ function PracticeTestsColumn({
                     </div>
                   </>
                 ) : (
-                  <div className="space-y-1">
-                    {test.composite || test.readingWriting || test.math ? (
-                      <p className="text-xs text-slate-700">
-                        <span className="font-semibold">{test.label}:</span>{' '}
-                        {test.composite ? (
-                          <span>{test.composite}</span>
-                        ) : null}
-                        {test.readingWriting || test.math ? (
-                          <>
-                            {test.composite ? ' ' : ''}
-                            {test.readingWriting ? (
-                              <span className="text-blue-600 font-medium">{test.readingWriting}</span>
+                  (() => {
+                    const formattedDate = test.date ? `${formatDateCompact(test.date)}:` : '';
+                    const compositeScore = test.composite ? Number.parseInt(test.composite, 10) : null;
+                    const englishScore = test.readingWriting
+                      ? Number.parseInt(test.readingWriting, 10)
+                      : null;
+                    const mathScore = test.math ? Number.parseInt(test.math, 10) : null;
+                    return (
+                      <div className="space-y-1">
+                        <p className="text-xs text-slate-700">
+                          {formattedDate ? `${formattedDate} ` : ''}
+                          <span className="font-semibold text-slate-900">{test.label}</span>
+                          {compositeScore !== null ? (
+                            <span className="ml-2 text-sm font-bold text-slate-900">{compositeScore}</span>
+                          ) : (
+                            <span className="ml-2 text-xs text-slate-400">—</span>
+                          )}
+                        </p>
+                        {(englishScore !== null || mathScore !== null) && (
+                          <div className="flex flex-wrap gap-3">
+                            {englishScore !== null ? (
+                              <span className="font-semibold text-blue-600">
+                                English:
+                                <span className="ml-1 font-normal text-slate-600">{englishScore}</span>
+                              </span>
                             ) : null}
-                            {test.readingWriting && test.math ? ' ' : ''}
-                            {test.math ? (
-                              <span className="text-rose-600 font-medium">{test.math}</span>
+                            {mathScore !== null ? (
+                              <span className="font-semibold text-rose-600">
+                                Math:
+                                <span className="ml-1 font-normal text-slate-600">{mathScore}</span>
+                              </span>
                             ) : null}
-                          </>
-                        ) : null}
-                      </p>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-slate-700">{test.label}</span>
-                        {test.date ? (
-                          <span className="text-slate-500 text-xs">{formatDate(test.date)}</span>
-                        ) : null}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    );
+                  })()
                 )}
               </li>
             ))}
@@ -1292,7 +1356,10 @@ function TestDayPredictor({ student }) {
         tests.push({
           date: test.date,
           composite: Number.parseInt(test.composite, 10),
-          type: 'practice'
+          english: test.readingWriting ? Number.parseInt(test.readingWriting, 10) : null,
+          math: test.math ? Number.parseInt(test.math, 10) : null,
+          type: 'practice',
+          label: test.label ?? 'Practice'
         });
       }
     });
@@ -1303,7 +1370,10 @@ function TestDayPredictor({ student }) {
         tests.push({
           date: test.date,
           composite: Number.parseInt(test.composite, 10),
-          type: 'practice'
+          english: test.readingWriting ? Number.parseInt(test.readingWriting, 10) : null,
+          math: test.math ? Number.parseInt(test.math, 10) : null,
+          type: 'practice',
+          label: test.label ?? 'Practice'
         });
       }
     });
@@ -1315,26 +1385,43 @@ function TestDayPredictor({ student }) {
         tests.push({
           date: test.date,
           composite: Number.parseInt(test.composite, 10),
-          type: 'real'
+          english: test.readingWriting ? Number.parseInt(test.readingWriting, 10) : null,
+          math: test.math ? Number.parseInt(test.math, 10) : null,
+          type: 'real',
+          label: test.notes?.trim() || 'Official'
         });
       });
     
     // Sort by date (newest first)
     return tests.sort((a, b) => {
-      if (a.date === b.date) return 0;
-      return b.date.localeCompare(a.date);
+      const dateA = a.date ?? '';
+      const dateB = b.date ?? '';
+      return dateB.localeCompare(dateA);
     });
   }, [student]);
   
   // Get last 3 scores
   const lastThreeScores = allTests.slice(0, 3);
-  const averageScore = lastThreeScores.length > 0
-    ? Math.round(lastThreeScores.reduce((sum, test) => sum + test.composite, 0) / lastThreeScores.length)
+  const averageScoreRaw = lastThreeScores.length > 0
+    ? lastThreeScores.reduce((sum, test) => sum + test.composite, 0) / lastThreeScores.length
+    : null;
+  const averageScore = typeof averageScoreRaw === 'number'
+    ? Math.round(averageScoreRaw / 10) * 10
     : null;
   
   if (!averageScore) {
     return null;
   }
+  
+  const chronologicalData = [...allTests].reverse();
+  const chartData = chronologicalData.map((test) => ({
+    date: test.date,
+    label: test.label,
+    type: test.type,
+    composite: test.composite,
+    english: typeof test.english === 'number' ? test.english : null,
+    math: typeof test.math === 'number' ? test.math : null
+  }));
   
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
@@ -1346,14 +1433,156 @@ function TestDayPredictor({ student }) {
           <div className="mt-2 space-y-1 text-xs text-slate-600">
             {lastThreeScores.map((test, index) => (
               <div key={index} className="flex items-center justify-between">
-                <span>{formatDate(test.date)}</span>
+                <span>{formatDateCompact(test.date)}</span>
                 <span className="font-medium">{test.composite}</span>
               </div>
             ))}
           </div>
         )}
       </div>
+      <ScoreTrendChart data={chartData} />
     </section>
+  );
+}
+
+function ScoreTrendChart({ data }) {
+  const chartData = Array.isArray(data) ? data : [];
+  if (chartData.length === 0) {
+    return null;
+  }
+
+  const scoreValues = chartData.flatMap((item) =>
+    [item.composite, item.english, item.math].filter(
+      (value) => typeof value === 'number' && !Number.isNaN(value)
+    )
+  );
+
+  if (scoreValues.length === 0) {
+    return null;
+  }
+
+  const width = 320;
+  const height = 160;
+  const paddingX = 32;
+  const paddingY = 24;
+  const minScore = Math.min(...scoreValues);
+  const maxScore = Math.max(...scoreValues);
+  const range = maxScore - minScore || 1;
+
+  const getX = (index) =>
+    chartData.length === 1
+      ? width / 2
+      : paddingX + (index / (chartData.length - 1)) * (width - paddingX * 2);
+
+  const getY = (value) =>
+    height -
+    paddingY -
+    ((value - minScore) / range) * (height - paddingY * 2);
+
+  const buildPath = (key) => {
+    let path = '';
+    let started = false;
+    chartData.forEach((item, index) => {
+      const value = item[key];
+      if (typeof value !== 'number' || Number.isNaN(value)) {
+        started = false;
+        return;
+      }
+      const x = getX(index);
+      const y = getY(value);
+      if (!started) {
+        path += `M ${x} ${y}`;
+        started = true;
+      } else {
+        path += ` L ${x} ${y}`;
+      }
+    });
+    return path;
+  };
+
+  const overallPath = buildPath('composite');
+  const englishPath = buildPath('english');
+  const mathPath = buildPath('math');
+
+  const shortLabel = (item) => {
+    if (item.label) {
+      return item.label.replace('Bluebook', 'BB');
+    }
+    return item.type === 'real' ? 'Official' : 'Test';
+  };
+
+  return (
+    <div className="mt-4">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-44 w-full max-w-sm"
+        role="img"
+        aria-label="Score trends chart"
+      >
+        {/* Axes */}
+        <line
+          x1={paddingX}
+          y1={height - paddingY}
+          x2={width - paddingX}
+          y2={height - paddingY}
+          stroke="#e2e8f0"
+        />
+        <line x1={paddingX} y1={paddingY} x2={paddingX} y2={height - paddingY} stroke="#e2e8f0" />
+
+        {/* Paths */}
+        {overallPath && (
+          <path d={overallPath} stroke="#0f172a" strokeWidth="2" fill="none" strokeLinecap="round" />
+        )}
+        {englishPath && (
+          <path d={englishPath} stroke="#2563eb" strokeWidth="2" fill="none" strokeLinecap="round" />
+        )}
+        {mathPath && (
+          <path d={mathPath} stroke="#dc2626" strokeWidth="2" fill="none" strokeLinecap="round" />
+        )}
+
+        {/* Circles */}
+        {chartData.map((item, index) => {
+          const x = getX(index);
+          return (
+            <g key={`${item.date}-${index}`}>
+              {typeof item.composite === 'number' ? (
+                <circle cx={x} cy={getY(item.composite)} r={3} fill="#0f172a" />
+              ) : null}
+              {typeof item.english === 'number' ? (
+                <circle cx={x} cy={getY(item.english)} r={2.5} fill="#2563eb" />
+              ) : null}
+              {typeof item.math === 'number' ? (
+                <circle cx={x} cy={getY(item.math)} r={2.5} fill="#dc2626" />
+              ) : null}
+            </g>
+          );
+        })}
+
+        {/* Labels */}
+        {chartData.map((item, index) => (
+          <text
+            key={`label-${item.date}-${index}`}
+            x={getX(index)}
+            y={height - paddingY + 14}
+            textAnchor="middle"
+            className="fill-slate-500 text-[10px]"
+          >
+            {shortLabel(item)}
+          </text>
+        ))}
+      </svg>
+      <div className="mt-3 flex flex-wrap gap-4 text-[11px] uppercase tracking-wide text-slate-500">
+        <span className="flex items-center gap-2">
+          <span className="h-1.5 w-4 rounded-full bg-slate-900" /> Overall
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="h-1.5 w-4 rounded-full bg-blue-600" /> English
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="h-1.5 w-4 rounded-full bg-rose-600" /> Math
+        </span>
+      </div>
+    </div>
   );
 }
 

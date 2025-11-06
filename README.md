@@ -14,8 +14,9 @@ A fast, client-only SAT autograder for English/Math worksheets. Upload a PDF/TXT
 * Columnar worksheet report: 3-4 columns showing question numbers with answers, color-coded by status (correct/incorrect/manual review).
 * Scorecard shows only the most recent upload (not aggregated across all attempts).
 * Student analytics dashboard with per-attempt history logs, aggregated progress, and reminders for what is still outstanding.
-* Test day score predictor: averages the last 3 practice/real test scores by date.
-* Practice test formatting: displays as "bluebook 04: 1230" with color-coded English (blue) and Math (red) subscores.
+* Test day score predictor: averages the last 3 practice/real test scores by date and rounds to the nearest 10.
+* Score trends chart: compact line graph plotting overall/English/Math scores over time.
+* Practice test formatting: displays dated entries like "Dec 12 2025: Bluebook 04 1230" with color-coded English (blue) and Math (red) subscores, newest first and untaken tests grouped below.
 
 ## Quick start
 
