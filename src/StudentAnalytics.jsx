@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ClipboardCopy, Plus, UserCircle2, X, Pencil, Check } from 'lucide-react';
 import { PRIORITY_LEVELS, WORKSHEET_PRIORITY, COURSE_GUIDELINES } from './studentMetadata.js';
 
@@ -246,6 +246,8 @@ function TopicChecklist({ student, worksheetsMeta, onUpdate }) {
 }
 
 function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
+  const [lastDeletedHistory, setLastDeletedHistory] = useState(null);
+
   const worksheetMap = useMemo(() => {
     const assigned = new Map();
     for (const entry of student.worksheets ?? []) {
@@ -253,6 +255,35 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     }
     return assigned;
   }, [student.worksheets]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z';
+      if (!isUndo || !lastDeletedHistory) {
+        return;
+      }
+      event.preventDefault();
+      const { worksheetId, entry, index } = lastDeletedHistory;
+      onUpdate((draft) => ({
+        worksheets: (draft.worksheets ?? []).map((worksheet) => {
+          if (worksheet.worksheetId !== worksheetId) {
+            return worksheet;
+          }
+          const history = Array.isArray(worksheet.history) ? [...worksheet.history] : [];
+          const insertIndex = Math.max(0, Math.min(index, history.length));
+          history.splice(insertIndex, 0, entry);
+          return {
+            ...worksheet,
+            history
+          };
+        })
+      }));
+      setLastDeletedHistory(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lastDeletedHistory, onUpdate]);
 
   const assignedList = useMemo(
     () =>
@@ -343,6 +374,12 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     if (!record || !historyId) {
       return;
     }
+    const historyList = Array.isArray(record.history) ? record.history : [];
+    const entryIndex = historyList.findIndex((entry) => entry.id === historyId);
+    if (entryIndex === -1) {
+      return;
+    }
+    const entryToRestore = historyList[entryIndex];
     onUpdate((draft) => ({
       worksheets: (draft.worksheets ?? []).map((worksheet) => {
         if (worksheet.worksheetId !== record.worksheetId) {
@@ -354,6 +391,11 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
         };
       })
     }));
+    setLastDeletedHistory({
+      worksheetId: record.worksheetId,
+      entry: entryToRestore,
+      index: entryIndex
+    });
   };
 
   const SubjectPanel = ({ subject, items }) => {
@@ -949,26 +991,28 @@ function PracticeTestsColumn({
                     const mathScore = test.math ? Number.parseInt(test.math, 10) : null;
                     return (
                       <div className="space-y-1">
-                        <p className="text-xs text-slate-700">
-                          {formattedDate ? `${formattedDate} ` : ''}
-                          <span className="font-semibold text-slate-900">{test.label}</span>
+                        <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
+                          {formattedDate ? (
+                            <span className="font-medium text-slate-600">{formattedDate}</span>
+                          ) : null}
+                          <span>{test.label}</span>
                           {compositeScore !== null ? (
-                            <span className="ml-2 text-sm font-bold text-slate-900">{compositeScore}</span>
+                            <span className="text-sm font-bold text-slate-900">{compositeScore}</span>
                           ) : (
-                            <span className="ml-2 text-xs text-slate-400">—</span>
+                            <span className="text-sm font-medium text-slate-400">—</span>
                           )}
                         </p>
                         {(englishScore !== null || mathScore !== null) && (
-                          <div className="flex flex-wrap gap-3">
+                          <div className="flex flex-wrap gap-3 text-xs text-slate-600">
                             {englishScore !== null ? (
                               <span className="font-semibold text-blue-600">
-                                English:
+                                English
                                 <span className="ml-1 font-normal text-slate-600">{englishScore}</span>
                               </span>
                             ) : null}
                             {mathScore !== null ? (
                               <span className="font-semibold text-rose-600">
-                                Math:
+                                Math
                                 <span className="ml-1 font-normal text-slate-600">{mathScore}</span>
                               </span>
                             ) : null}
@@ -1451,23 +1495,15 @@ function ScoreTrendChart({ data }) {
     return null;
   }
 
-  const scoreValues = chartData.flatMap((item) =>
-    [item.composite, item.english, item.math].filter(
-      (value) => typeof value === 'number' && !Number.isNaN(value)
-    )
-  );
-
-  if (scoreValues.length === 0) {
-    return null;
-  }
-
-  const width = 320;
-  const height = 160;
-  const paddingX = 32;
-  const paddingY = 24;
-  const minScore = Math.min(...scoreValues);
-  const maxScore = Math.max(...scoreValues);
-  const range = maxScore - minScore || 1;
+  const width = 640;
+  const height = 220;
+  const paddingX = 48;
+  const paddingYTop = 36;
+  const paddingYBottom = 40;
+  const minScore = 400;
+  const maxScore = 1600;
+  const range = maxScore - minScore;
+  const step = 100;
 
   const getX = (index) =>
     chartData.length === 1
@@ -1476,8 +1512,9 @@ function ScoreTrendChart({ data }) {
 
   const getY = (value) =>
     height -
-    paddingY -
-    ((value - minScore) / range) * (height - paddingY * 2);
+    paddingYBottom -
+    ((Math.min(Math.max(value, minScore), maxScore) - minScore) / range) *
+      (height - paddingYTop - paddingYBottom);
 
   const buildPath = (key) => {
     let path = '';
@@ -1511,23 +1548,55 @@ function ScoreTrendChart({ data }) {
     return item.type === 'real' ? 'Official' : 'Test';
   };
 
+  const ticks = [];
+  for (let score = minScore; score <= maxScore; score += step) {
+    ticks.push(score);
+  }
+
+  const labelOffset = 14;
+
   return (
     <div className="mt-4">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-44 w-full max-w-sm"
+        className="h-60 w-full"
         role="img"
         aria-label="Score trends chart"
       >
         {/* Axes */}
         <line
           x1={paddingX}
-          y1={height - paddingY}
+          y1={height - paddingYBottom}
           x2={width - paddingX}
-          y2={height - paddingY}
-          stroke="#e2e8f0"
+          y2={height - paddingYBottom}
+          stroke="#cbd5f5"
         />
-        <line x1={paddingX} y1={paddingY} x2={paddingX} y2={height - paddingY} stroke="#e2e8f0" />
+        <line x1={paddingX} y1={paddingYTop} x2={paddingX} y2={height - paddingYBottom} stroke="#cbd5f5" />
+
+        {/* Horizontal grid lines */}
+        {ticks.map((score) => {
+          const y = getY(score);
+          return (
+            <g key={`grid-${score}`}>
+              <line
+                x1={paddingX}
+                y1={y}
+                x2={width - paddingX}
+                y2={y}
+                stroke="#e2e8f0"
+                strokeDasharray="4 4"
+              />
+              <text
+                x={paddingX - 10}
+                y={y + 4}
+                textAnchor="end"
+                className="fill-slate-400 text-[10px]"
+              >
+                {score}
+              </text>
+            </g>
+          );
+        })}
 
         {/* Paths */}
         {overallPath && (
@@ -1543,16 +1612,73 @@ function ScoreTrendChart({ data }) {
         {/* Circles */}
         {chartData.map((item, index) => {
           const x = getX(index);
+          const compositeY = typeof item.composite === 'number' ? getY(item.composite) : null;
+          const englishY = typeof item.english === 'number' ? getY(item.english) : null;
+          const mathY = typeof item.math === 'number' ? getY(item.math) : null;
+          const validY = (value) => typeof value === 'number' && !Number.isNaN(value);
+          const computeOffset = (value, others) => {
+            if (!validY(value)) {
+              return null;
+            }
+            const validOthers = others.filter((other) => validY(other));
+            const higherCount = validOthers.filter((other) => value < other).length;
+            const lowerCount = validOthers.filter((other) => value > other).length;
+            if (higherCount === validOthers.length) {
+              return -labelOffset;
+            }
+            if (lowerCount === validOthers.length) {
+              return labelOffset + 4;
+            }
+            if (higherCount > lowerCount) {
+              return -labelOffset;
+            }
+            if (lowerCount > higherCount) {
+              return labelOffset + 4;
+            }
+            return value < (compositeY ?? value) ? -labelOffset : labelOffset + 4;
+          };
+          const englishOffset = computeOffset(englishY, [compositeY, mathY]);
+          const mathOffset = computeOffset(mathY, [compositeY, englishY]);
           return (
             <g key={`${item.date}-${index}`}>
-              {typeof item.composite === 'number' ? (
-                <circle cx={x} cy={getY(item.composite)} r={3} fill="#0f172a" />
+              {compositeY !== null ? (
+                <>
+                  <circle cx={x} cy={compositeY} r={3} fill="#0f172a" />
+                  <text
+                    x={x}
+                    y={compositeY - labelOffset}
+                    textAnchor="middle"
+                    className="fill-slate-900 text-[10px] font-semibold"
+                  >
+                    {item.composite}
+                  </text>
+                </>
               ) : null}
-              {typeof item.english === 'number' ? (
-                <circle cx={x} cy={getY(item.english)} r={2.5} fill="#2563eb" />
+              {englishY !== null ? (
+                <>
+                  <circle cx={x} cy={englishY} r={2.5} fill="#2563eb" />
+                  <text
+                    x={x}
+                    y={englishY + (englishOffset ?? labelOffset)}
+                    textAnchor="middle"
+                    className="fill-blue-600 text-[9px]"
+                  >
+                    {item.english}
+                  </text>
+                </>
               ) : null}
-              {typeof item.math === 'number' ? (
-                <circle cx={x} cy={getY(item.math)} r={2.5} fill="#dc2626" />
+              {mathY !== null ? (
+                <>
+                  <circle cx={x} cy={mathY} r={2.5} fill="#dc2626" />
+                  <text
+                    x={x}
+                    y={mathY + (mathOffset ?? labelOffset)}
+                    textAnchor="middle"
+                    className="fill-rose-600 text-[9px]"
+                  >
+                    {item.math}
+                  </text>
+                </>
               ) : null}
             </g>
           );
@@ -1563,7 +1689,7 @@ function ScoreTrendChart({ data }) {
           <text
             key={`label-${item.date}-${index}`}
             x={getX(index)}
-            y={height - paddingY + 14}
+            y={height - paddingYBottom + 16}
             textAnchor="middle"
             className="fill-slate-500 text-[10px]"
           >
@@ -1720,11 +1846,11 @@ export function StudentAnalytics({
       </header>
 
       <main className="mx-auto mt-6 max-w-[90rem] px-4">
-        <div className="grid gap-8 lg:grid-cols-4">
+        <div className="grid gap-8 lg:grid-cols-4 xl:grid-cols-4">
           <div className="space-y-4 lg:col-span-2">
             <WorksheetsColumn student={student} worksheetsMeta={worksheetsMeta} onUpdate={onUpdate} />
           </div>
-          <div className="space-y-4 lg:col-span-1">
+          <div className="lg:col-span-1">
             <PracticeTestsColumn
               student={student}
               onAddCustomPractice={onAddCustomPractice}
@@ -1732,6 +1858,8 @@ export function StudentAnalytics({
               onUpdateCustomPractice={onUpdateCustomPractice}
               onDeleteCustomPractice={onDeleteCustomPractice}
             />
+          </div>
+          <div className="lg:col-span-1">
             <OfficialTestsColumn
               student={student}
               onUpdate={onUpdate}
@@ -1739,6 +1867,8 @@ export function StudentAnalytics({
               onUpdateRealTest={onUpdateRealTest}
               onDeleteRealTest={onDeleteRealTest}
             />
+          </div>
+          <div className="flex flex-col gap-6 lg:col-span-2 lg:col-start-3">
             <TestDayPredictor student={student} />
             <ReferenceColumn onDeleteStudent={onDeleteStudent} />
           </div>
