@@ -416,7 +416,7 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
     }
     setCollapsedCards((previous) => ({
       ...previous,
-      [cardId]: !previous?.[cardId]
+      [cardId]: !(previous?.[cardId] ?? true)
     }));
   };
 
@@ -571,7 +571,7 @@ function WorksheetsColumn({ student, worksheetsMeta, onUpdate }) {
               const remainingPercent =
                 totalQuestions > 0 ? (remainingQuestions / totalQuestions) * 100 : 0;
               const cardId = record?.worksheetId ?? record?.id ?? meta.id;
-              const isCollapsed = Boolean(collapsedCards[cardId]);
+              const isCollapsed = collapsedCards[cardId] ?? true;
 
               return (
                 <li
@@ -1449,8 +1449,7 @@ function AssessmentsColumn({
 }) {
   return (
     <section className="rounded-3xl border border-white/80 bg-white p-5 shadow-lg shadow-sky-100">
-      <h2 className="text-lg font-semibold text-slate-900">Practice tests &amp; SAT timeline</h2>
-      <div className="mt-4 space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
         <PracticeTestsColumn
           student={student}
           onAddCustomPractice={onAddCustomPractice}
